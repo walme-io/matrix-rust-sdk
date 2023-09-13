@@ -6,13 +6,12 @@ mod filter;
 mod permissions;
 mod widget_settings;
 
-use crate::Room;
-
 pub use self::{
     filter::{EventFilter, MessageLikeEventFilter, StateEventFilter},
     permissions::{Permissions, PermissionsProvider},
     widget_settings::WidgetSettings,
 };
+use crate::Room;
 
 /// Describes a widget.
 #[derive(Debug)]
