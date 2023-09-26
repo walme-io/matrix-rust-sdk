@@ -11,11 +11,14 @@ mod client;
 mod filter;
 mod messages;
 mod permissions;
+mod widget_settings;
 
 pub use self::{
     filter::{EventFilter, MessageLikeEventFilter, StateEventFilter},
     permissions::{Permissions, PermissionsProvider},
+    widget_settings::{ClientProperties, WidgetSettings},
 };
+use crate::Room;
 
 /// Describes a widget.
 #[derive(Debug)]
@@ -24,17 +27,6 @@ pub struct Widget {
     pub settings: WidgetSettings,
     /// Communication channels with a widget.
     pub comm: Comm,
-}
-
-/// Settings for a widget.
-#[derive(Debug)]
-pub struct WidgetSettings {
-    /// Widget's unique identifier.
-    pub id: String,
-    /// Whether or not the widget should be initialized on load message
-    /// (`ContentLoad` message), or upon creation/attaching of the widget to
-    /// the SDK's state machine that drives the API.
-    pub init_on_load: bool,
 }
 
 /// Communication "pipes" with a widget.
