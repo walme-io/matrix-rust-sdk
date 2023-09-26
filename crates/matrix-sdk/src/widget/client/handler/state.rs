@@ -39,7 +39,7 @@ impl<T: PermissionsProvider> State<T> {
     pub(super) async fn listen(mut self, mut rx: UnboundedReceiver<Request>) {
         // Typically, widget's capabilities are initialized on a special `ContentLoad`
         // message. However, if this flag is set, we must initialize them right away.
-        if !self.widget.init_on_load() {
+        if !self.widget.init_after_content_load() {
             if let Err(err) = self.initialize().await {
                 // We really don't have a mechanism to inform a widget about out of bound
                 // errors. So the only thing we can do here is to log it.
@@ -68,7 +68,7 @@ impl<T: PermissionsProvider> State<T> {
 
             Request::ContentLoaded(req) => {
                 let (response, negotiate) =
-                    match (self.widget.init_on_load(), self.capabilities.as_ref()) {
+                    match (self.widget.init_after_content_load(), self.capabilities.as_ref()) {
                         (true, None) => (Ok(Empty {}), true),
                         (true, Some(..)) => (Err("Already loaded".into()), false),
                         _ => (Ok(Empty {}), false),

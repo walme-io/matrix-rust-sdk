@@ -117,8 +117,8 @@ impl WidgetProxy {
 
     /// Tells whether or not we should negotiate supported capabilities on
     /// `ContentLoad` or not (if `false`, they are negotiated right away).
-    pub(crate) fn init_on_load(&self) -> bool {
-        self.info.init_on_load
+    pub(crate) fn init_after_content_load(&self) -> bool {
+        self.info.init_after_content_load
     }
 
     pub(crate) fn id(&self) -> &str {
