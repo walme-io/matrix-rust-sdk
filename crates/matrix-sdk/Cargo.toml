@@ -54,7 +54,7 @@ experimental-sliding-sync = [
     "reqwest/gzip",
     "dep:eyeball-im-util",
 ]
-experimental-widgets = ["dep:uuid"]
+experimental-widgets = ["dep:uuid", "dep:language-tags"]
 
 docsrs = ["e2e-encryption", "sqlite", "sso-login", "qrcode", "image-proc"]
 
