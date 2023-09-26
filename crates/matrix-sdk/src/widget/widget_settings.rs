@@ -37,7 +37,7 @@ pub struct WidgetSettings {
     ///
     /// e.g `http://widget.domain?username=$userId`
     /// will become: `http://widget.domain?username=@user_matrix_id:server.domain`.
-    raw_url: String,
+    pub raw_url: String,
 }
 
 impl WidgetSettings {

@@ -103,24 +103,30 @@ impl WidgetSettings {
     /// * `base_url` the url of the matrix homserver in use e.g. https://matrix-client.matrix.org.
     /// * `analytics_id` can be used to pass a posthog id to element call.
     pub fn new_virtual_element_call_widget(
-        element_call_path: &str,
-        id: String,
-        embed: bool,
-        hide_header: bool,
-        preload: bool,
-        font_scale: f64,
+        element_call_url: &str,
+        widget_id: String,
+        parent_url: Option<&str>,
+        hide_header: Option<bool>,
+        preload: Option<bool>,
+        font_scale: Option<f64>,
+        app_prompt: Option<bool>,
+        skip_lobby: Option<bool>,
+        confine_to_room: Option<bool>,
+        fonts: Option<Vec<String>>,
         analytics_id: Option<&str>,
-        parent_url: &str,
     ) -> Self {
         matrix_sdk::widget::WidgetSettings::new_virtual_element_call_widget(
-            element_call_path,
-            id,
-            embed,
+            element_call_url,
+            widget_id,
+            parent_url,
             hide_header,
             preload,
             font_scale,
+            app_prompt,
+            skip_lobby,
+            confine_to_room,
+            fonts,
             analytics_id,
-            parent_url,
         )
         .into()
     }

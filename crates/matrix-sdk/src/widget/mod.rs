@@ -18,7 +18,6 @@ pub use self::{
     permissions::{Permissions, PermissionsProvider},
     widget_settings::{ClientProperties, WidgetSettings},
 };
-use crate::Room;
 
 /// Describes a widget.
 #[derive(Debug)]
