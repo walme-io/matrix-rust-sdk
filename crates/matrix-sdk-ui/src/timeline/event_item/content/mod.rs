@@ -12,23 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt, ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 use as_variant::as_variant;
-use imbl::{vector, Vector};
-use indexmap::IndexMap;
-use itertools::Itertools;
-use matrix_sdk::{deserialized_responses::TimelineEvent, Result};
+use imbl::Vector;
 use matrix_sdk_base::latest_event::{is_suitable_for_latest_event, PossibleLatestEvent};
 use ruma::{
-    assign,
     events::{
         policy::rule::{
             room::PolicyRuleRoomEventContent, server::PolicyRuleServerEventContent,
             user::PolicyRuleUserEventContent,
         },
         poll::unstable_start::{NewUnstablePollStartEventContent, SyncUnstablePollStartEvent},
-        relation::InReplyTo,
         room::{
             aliases::RoomAliasesEventContent,
             avatar::RoomAvatarEventContent,
@@ -40,7 +35,7 @@ use ruma::{
             history_visibility::RoomHistoryVisibilityEventContent,
             join_rules::RoomJoinRulesEventContent,
             member::{Change, RoomMemberEventContent},
-            message::{self, MessageType, Relation, RoomMessageEventContent, SyncRoomMessageEvent},
+            message::{RoomMessageEventContent, SyncRoomMessageEvent},
             name::RoomNameEventContent,
             pinned_events::RoomPinnedEventsEventContent,
             power_levels::RoomPowerLevelsEventContent,
@@ -51,24 +46,18 @@ use ruma::{
         },
         space::{child::SpaceChildEventContent, parent::SpaceParentEventContent},
         sticker::StickerEventContent,
-        AnyFullStateEventContent, AnyMessageLikeEventContent, AnySyncMessageLikeEvent,
-        AnySyncTimelineEvent, AnyTimelineEvent, BundledMessageLikeRelations, FullStateEventContent,
-        MessageLikeEventType, StateEventType,
+        AnyFullStateEventContent, AnySyncMessageLikeEvent, AnySyncTimelineEvent,
+        BundledMessageLikeRelations, FullStateEventContent, MessageLikeEventType, StateEventType,
     },
-    html::RemoveReplyFallback,
-    OwnedDeviceId, OwnedEventId, OwnedMxcUri, OwnedTransactionId, OwnedUserId, RoomVersionId,
-    UserId,
+    OwnedDeviceId, OwnedMxcUri, OwnedUserId, RoomVersionId, UserId,
 };
-use tracing::{error, warn};
+use tracing::warn;
 
-use super::{EventItemIdentifier, EventTimelineItem, Profile, TimelineDetails};
-use crate::{
-    timeline::{
-        polls::PollState, traits::RoomDataProvider, Error as TimelineError, ReactionSenderData,
-        TimelineItem,
-    },
-    DEFAULT_SANITIZER_MODE,
-};
+use crate::timeline::{polls::PollState, TimelineItem};
+
+mod message;
+
+pub use self::message::{InReplyToDetails, Message, RepliedToEvent};
 
 /// The content of an [`EventTimelineItem`][super::EventTimelineItem].
 #[derive(Clone, Debug)]
@@ -226,6 +215,22 @@ impl TimelineItemContent {
         Self::Message(Message::from_event(c, relations, timeline_items))
     }
 
+    #[cfg(not(tarpaulin_include))] // debug-logging functionality
+    pub(crate) fn debug_string(&self) -> &'static str {
+        match self {
+            TimelineItemContent::Message(_) => "a message",
+            TimelineItemContent::RedactedMessage => "a redacted messages",
+            TimelineItemContent::Sticker(_) => "a sticker",
+            TimelineItemContent::UnableToDecrypt(_) => "a poll",
+            TimelineItemContent::MembershipChange(_) => "a membership change",
+            TimelineItemContent::ProfileChange(_) => "a profile change",
+            TimelineItemContent::OtherState(_) => "a state event",
+            TimelineItemContent::FailedToParseMessageLike { .. }
+            | TimelineItemContent::FailedToParseState { .. } => "an event that couldn't be parsed",
+            TimelineItemContent::Poll(_) => "a poll",
+        }
+    }
+
     pub(crate) fn unable_to_decrypt(content: RoomEncryptedEventContent) -> Self {
         Self::UnableToDecrypt(content.into())
     }
@@ -310,227 +315,6 @@ impl TimelineItemContent {
     }
 }
 
-/// An `m.room.message` event or extensible event, including edits.
-#[derive(Clone)]
-pub struct Message {
-    pub(in crate::timeline) msgtype: MessageType,
-    pub(in crate::timeline) in_reply_to: Option<InReplyToDetails>,
-    pub(in crate::timeline) threaded: bool,
-    pub(in crate::timeline) edited: bool,
-}
-
-impl Message {
-    /// Construct a `Message` from a `m.room.message` event.
-    pub(in crate::timeline) fn from_event(
-        c: RoomMessageEventContent,
-        relations: BundledMessageLikeRelations<AnySyncMessageLikeEvent>,
-        timeline_items: &Vector<Arc<TimelineItem>>,
-    ) -> Self {
-        let edited = relations.has_replacement();
-        let edit = relations.replace.and_then(|r| match *r {
-            AnySyncMessageLikeEvent::RoomMessage(SyncRoomMessageEvent::Original(ev)) => match ev
-                .content
-                .relates_to
-            {
-                Some(Relation::Replacement(re)) => Some(re),
-                _ => {
-                    error!("got m.room.message event with an edit without a valid m.replace relation");
-                    None
-                }
-            },
-            AnySyncMessageLikeEvent::RoomMessage(SyncRoomMessageEvent::Redacted(_)) => None,
-            _ => {
-                error!("got m.room.message event with an edit of a different event type");
-                None
-            }
-        });
-
-        let mut threaded = false;
-        let in_reply_to = c.relates_to.and_then(|relation| match relation {
-            message::Relation::Reply { in_reply_to } => {
-                Some(InReplyToDetails::new(in_reply_to.event_id, timeline_items))
-            }
-            message::Relation::Thread(thread) => {
-                threaded = true;
-                thread
-                    .in_reply_to
-                    .map(|in_reply_to| InReplyToDetails::new(in_reply_to.event_id, timeline_items))
-            }
-            _ => None,
-        });
-
-        let msgtype = match edit {
-            Some(mut e) => {
-                // Edit's content is never supposed to contain the reply fallback.
-                e.new_content.msgtype.sanitize(DEFAULT_SANITIZER_MODE, RemoveReplyFallback::No);
-                e.new_content.msgtype
-            }
-            None => {
-                let remove_reply_fallback = if in_reply_to.is_some() {
-                    RemoveReplyFallback::Yes
-                } else {
-                    RemoveReplyFallback::No
-                };
-
-                let mut msgtype = c.msgtype;
-                msgtype.sanitize(DEFAULT_SANITIZER_MODE, remove_reply_fallback);
-                msgtype
-            }
-        };
-
-        Self { msgtype, in_reply_to, threaded, edited }
-    }
-
-    /// Get the `msgtype`-specific data of this message.
-    pub fn msgtype(&self) -> &MessageType {
-        &self.msgtype
-    }
-
-    /// Get a reference to the message body.
-    ///
-    /// Shorthand for `.msgtype().body()`.
-    pub fn body(&self) -> &str {
-        self.msgtype.body()
-    }
-
-    /// Get the event this message is replying to, if any.
-    pub fn in_reply_to(&self) -> Option<&InReplyToDetails> {
-        self.in_reply_to.as_ref()
-    }
-
-    /// Whether this message is part of a thread.
-    pub fn is_threaded(&self) -> bool {
-        self.threaded
-    }
-
-    /// Get the edit state of this message (has been edited: `true` / `false`).
-    pub fn is_edited(&self) -> bool {
-        self.edited
-    }
-
-    pub(in crate::timeline) fn with_in_reply_to(&self, in_reply_to: InReplyToDetails) -> Self {
-        Self { in_reply_to: Some(in_reply_to), ..self.clone() }
-    }
-}
-
-impl From<Message> for RoomMessageEventContent {
-    fn from(msg: Message) -> Self {
-        let relates_to = msg.in_reply_to.map(|details| message::Relation::Reply {
-            in_reply_to: InReplyTo::new(details.event_id),
-        });
-        assign!(Self::new(msg.msgtype), { relates_to })
-    }
-}
-
-#[cfg(not(tarpaulin_include))]
-impl fmt::Debug for Message {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { msgtype: _, in_reply_to, threaded, edited } = self;
-        // since timeline items are logged, don't include all fields here so
-        // people don't leak personal data in bug reports
-        f.debug_struct("Message")
-            .field("in_reply_to", in_reply_to)
-            .field("threaded", threaded)
-            .field("edited", edited)
-            .finish_non_exhaustive()
-    }
-}
-
-/// Details about an event being replied to.
-#[derive(Clone, Debug)]
-pub struct InReplyToDetails {
-    /// The ID of the event.
-    pub event_id: OwnedEventId,
-
-    /// The details of the event.
-    ///
-    /// Use [`Timeline::fetch_details_for_event`] to fetch the data if it is
-    /// unavailable.
-    ///
-    /// [`Timeline::fetch_details_for_event`]: crate::Timeline::fetch_details_for_event
-    pub event: TimelineDetails<Box<RepliedToEvent>>,
-}
-
-impl InReplyToDetails {
-    pub fn new(
-        event_id: OwnedEventId,
-        timeline_items: &Vector<Arc<TimelineItem>>,
-    ) -> InReplyToDetails {
-        let event = timeline_items
-            .iter()
-            .filter_map(|it| it.as_event())
-            .find(|it| it.event_id() == Some(&*event_id))
-            .map(|item| Box::new(RepliedToEvent::from_timeline_item(item)));
-
-        InReplyToDetails { event_id, event: TimelineDetails::from_initial_value(event) }
-    }
-}
-
-/// An event that is replied to.
-#[derive(Clone, Debug)]
-pub struct RepliedToEvent {
-    pub(in crate::timeline) content: TimelineItemContent,
-    pub(in crate::timeline) sender: OwnedUserId,
-    pub(in crate::timeline) sender_profile: TimelineDetails<Profile>,
-}
-
-impl RepliedToEvent {
-    /// Get the message of this event.
-    pub fn content(&self) -> &TimelineItemContent {
-        &self.content
-    }
-
-    /// Get the sender of this event.
-    pub fn sender(&self) -> &UserId {
-        &self.sender
-    }
-
-    /// Get the profile of the sender.
-    pub fn sender_profile(&self) -> &TimelineDetails<Profile> {
-        &self.sender_profile
-    }
-
-    fn from_timeline_item(timeline_item: &EventTimelineItem) -> Self {
-        Self {
-            content: timeline_item.content.clone(),
-            sender: timeline_item.sender.clone(),
-            sender_profile: timeline_item.sender_profile.clone(),
-        }
-    }
-
-    pub(in crate::timeline) fn redact(&self, room_version: &RoomVersionId) -> Self {
-        Self {
-            content: self.content.redact(room_version),
-            sender: self.sender.clone(),
-            sender_profile: self.sender_profile.clone(),
-        }
-    }
-
-    pub(in crate::timeline) async fn try_from_timeline_event<P: RoomDataProvider>(
-        timeline_event: TimelineEvent,
-        room_data_provider: &P,
-    ) -> Result<Self, TimelineError> {
-        let event = match timeline_event.event.deserialize() {
-            Ok(AnyTimelineEvent::MessageLike(event)) => event,
-            _ => {
-                return Err(TimelineError::UnsupportedEvent);
-            }
-        };
-
-        let Some(AnyMessageLikeEventContent::RoomMessage(c)) = event.original_content() else {
-            return Err(TimelineError::UnsupportedEvent);
-        };
-
-        let content =
-            TimelineItemContent::Message(Message::from_event(c, event.relations(), &vector![]));
-        let sender = event.sender().to_owned();
-        let sender_profile =
-            TimelineDetails::from_initial_value(room_data_provider.profile(&sender).await);
-
-        Ok(Self { content, sender, sender_profile })
-    }
-}
-
 /// Metadata about an `m.room.encrypted` event that could not be decrypted.
 #[derive(Clone, Debug)]
 pub enum EncryptedMessage {
@@ -572,50 +356,6 @@ impl From<RoomEncryptedEventContent> for EncryptedMessage {
             }
             _ => Self::Unknown,
         }
-    }
-}
-
-/// The reactions grouped by key.
-///
-/// Key: The reaction, usually an emoji.\
-/// Value: The group of reactions.
-pub type BundledReactions = IndexMap<String, ReactionGroup>;
-/// A group of reaction events on the same event with the same key.
-///
-/// This is a map of the event ID or transaction ID of the reactions to the ID
-/// of the sender of the reaction.
-#[derive(Clone, Debug, Default)]
-pub struct ReactionGroup(pub(in crate::timeline) IndexMap<EventItemIdentifier, ReactionSenderData>);
-
-impl ReactionGroup {
-    /// The (deduplicated) senders of the reactions in this group.
-    pub fn senders(&self) -> impl Iterator<Item = &ReactionSenderData> {
-        self.values().unique_by(|v| &v.sender_id)
-    }
-
-    /// All reactions within this reaction group that were sent by the given
-    /// user.
-    ///
-    /// Note that it is possible for multiple reactions by the same user to
-    /// have arrived over federation.
-    pub fn by_sender<'a>(
-        &'a self,
-        user_id: &'a UserId,
-    ) -> impl Iterator<Item = (Option<&OwnedTransactionId>, Option<&OwnedEventId>)> + 'a {
-        self.iter().filter_map(move |(k, v)| {
-            (v.sender_id == user_id).then_some(match k {
-                EventItemIdentifier::TransactionId(txn_id) => (Some(txn_id), None),
-                EventItemIdentifier::EventId(event_id) => (None, Some(event_id)),
-            })
-        })
-    }
-}
-
-impl Deref for ReactionGroup {
-    type Target = IndexMap<EventItemIdentifier, ReactionSenderData>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -983,5 +723,42 @@ impl OtherState {
 
     fn redact(&self, room_version: &RoomVersionId) -> Self {
         Self { state_key: self.state_key.clone(), content: self.content.redact(room_version) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use assert_matches::assert_matches;
+    use matrix_sdk_test::ALICE;
+    use ruma::{
+        assign,
+        events::{
+            room::member::{MembershipState, RoomMemberEventContent},
+            FullStateEventContent,
+        },
+        RoomVersionId,
+    };
+
+    use super::{MembershipChange, RoomMembershipChange, TimelineItemContent};
+
+    #[test]
+    fn redact_membership_change() {
+        let content = TimelineItemContent::MembershipChange(RoomMembershipChange {
+            user_id: ALICE.to_owned(),
+            content: FullStateEventContent::Original {
+                content: assign!(RoomMemberEventContent::new(MembershipState::Ban), {
+                    reason: Some("🤬".to_owned()),
+                }),
+                prev_content: Some(RoomMemberEventContent::new(MembershipState::Join)),
+            },
+            change: Some(MembershipChange::Banned),
+        });
+
+        let redacted = content.redact(&RoomVersionId::V11);
+        let inner = assert_matches!(redacted, TimelineItemContent::MembershipChange(c) => c);
+        assert_eq!(inner.change, Some(MembershipChange::Banned));
+        let inner_content_redacted =
+            assert_matches!(inner.content, FullStateEventContent::Redacted(r) => r);
+        assert_eq!(inner_content_redacted.membership, MembershipState::Ban);
     }
 }

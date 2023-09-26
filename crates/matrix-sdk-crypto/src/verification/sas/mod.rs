@@ -188,28 +188,24 @@ impl From<&InnerSas> for SasState {
                 Self::Accepted { accepted_protocols: s.state.accepted_protocols.to_owned() }
             }
             InnerSas::KeysExchanged(s) => {
-                let emojis = if value.supports_emoji() {
+                let emojis = value.supports_emoji().then(|| {
                     let emojis = s.get_emoji();
                     let indices = s.get_emoji_index();
 
-                    Some(EmojiShortAuthString { emojis, indices })
-                } else {
-                    None
-                };
+                    EmojiShortAuthString { emojis, indices }
+                });
 
                 let decimals = s.get_decimal();
 
                 Self::KeysExchanged { emojis, decimals }
             }
             InnerSas::MacReceived(s) => {
-                let emojis = if value.supports_emoji() {
+                let emojis = value.supports_emoji().then(|| {
                     let emojis = s.get_emoji();
                     let indices = s.get_emoji_index();
 
-                    Some(EmojiShortAuthString { emojis, indices })
-                } else {
-                    None
-                };
+                    EmojiShortAuthString { emojis, indices }
+                });
 
                 let decimals = s.get_decimal();
 
@@ -259,11 +255,7 @@ impl Sas {
 
     /// Get the room id if the verification is happening inside a room.
     pub fn room_id(&self) -> Option<&RoomId> {
-        if let FlowId::InRoom(r, _) = self.flow_id() {
-            Some(r)
-        } else {
-            None
-        }
+        as_variant!(self.flow_id(), FlowId::InRoom(r, _) => r)
     }
 
     /// Does this verification flow support displaying emoji for the short
@@ -295,11 +287,9 @@ impl Sas {
     /// Get info about the cancellation if the verification flow has been
     /// cancelled.
     pub fn cancel_info(&self) -> Option<CancelInfo> {
-        if let InnerSas::Cancelled(c) = &*self.inner.read() {
-            Some(c.state.as_ref().clone().into())
-        } else {
-            None
-        }
+        as_variant!(&*self.inner.read(), InnerSas::Cancelled(c) => {
+            c.state.as_ref().clone().into()
+        })
     }
 
     /// Did we initiate the verification flow.

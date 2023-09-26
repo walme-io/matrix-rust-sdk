@@ -350,6 +350,8 @@ impl Room {
     }
 
     /// Get the `m.room.name` of this room.
+    ///
+    /// The returned string is guaranteed not to be empty.
     pub fn name(&self) -> Option<String> {
         self.inner.read().name().map(ToOwned::to_owned)
     }
@@ -1022,7 +1024,8 @@ impl RoomInfo {
     }
 
     fn name(&self) -> Option<&str> {
-        Some(&self.base_info.name.as_ref()?.as_original()?.content.name)
+        let name = &self.base_info.name.as_ref()?.as_original()?.content.name;
+        (!name.is_empty()).then_some(name)
     }
 
     fn tombstone(&self) -> Option<&RoomTombstoneEventContent> {
@@ -1357,6 +1360,19 @@ mod tests {
     }
 
     #[async_test]
+    async fn display_name_for_invited_room_is_empty_if_room_name_empty() {
+        let (_, room) = make_room(RoomState::Invited);
+
+        let room_name = MinimalStateEvent::Original(OriginalMinimalStateEvent {
+            content: RoomNameEventContent::new(String::new()),
+            event_id: None,
+        });
+        room.inner.update(|info| info.base_info.name = Some(room_name));
+
+        assert_eq!(room.display_name().await.unwrap(), DisplayName::Empty);
+    }
+
+    #[async_test]
     async fn display_name_for_invited_room_uses_canonical_alias_if_available() {
         let (_, room) = make_room(RoomState::Invited);
         room.inner
@@ -1386,7 +1402,7 @@ mod tests {
 
     fn make_name_event() -> MinimalStateEvent<RoomNameEventContent> {
         MinimalStateEvent::Original(OriginalMinimalStateEvent {
-            content: RoomNameEventContent::new("Test Room".try_into().unwrap()),
+            content: RoomNameEventContent::new("Test Room".to_owned()),
             event_id: None,
         })
     }

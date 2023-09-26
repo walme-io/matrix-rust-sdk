@@ -28,15 +28,17 @@ use tracing::warn;
 
 mod content;
 mod local;
+mod reactions;
 mod remote;
 
 pub use self::{
     content::{
-        AnyOtherFullStateEventContent, BundledReactions, EncryptedMessage, InReplyToDetails,
-        MemberProfileChange, MembershipChange, Message, OtherState, ReactionGroup, RepliedToEvent,
-        RoomMembershipChange, Sticker, TimelineItemContent,
+        AnyOtherFullStateEventContent, EncryptedMessage, InReplyToDetails, MemberProfileChange,
+        MembershipChange, Message, OtherState, RepliedToEvent, RoomMembershipChange, Sticker,
+        TimelineItemContent,
     },
     local::EventSendState,
+    reactions::{BundledReactions, ReactionGroup},
 };
 pub(super) use self::{
     local::LocalEventTimelineItem,
@@ -309,6 +311,18 @@ impl EventTimelineItem {
         }
     }
 
+    /// Check whether this item can be replied to.
+    pub fn can_be_replied_to(&self) -> bool {
+        // This must be in sync with the early returns of `Timeline::send_reply`
+        if self.event_id().is_none() {
+            false
+        } else if let TimelineItemContent::Message(_) = self.content() {
+            true
+        } else {
+            self.latest_json().is_some()
+        }
+    }
+
     /// Get the raw JSON representation of the initial event (the one that
     /// caused this timeline item to be created).
     ///
@@ -327,6 +341,12 @@ impl EventTimelineItem {
             EventTimelineItemKind::Local(_local_event) => None,
             EventTimelineItemKind::Remote(remote_event) => remote_event.latest_edit_json.as_ref(),
         }
+    }
+
+    /// Shorthand for
+    /// `item.latest_edit_json().or_else(|| item.original_json())`.
+    pub fn latest_json(&self) -> Option<&Raw<AnySyncTimelineEvent>> {
+        self.latest_edit_json().or_else(|| self.original_json())
     }
 
     /// Get the origin of the event, i.e. where it came from.

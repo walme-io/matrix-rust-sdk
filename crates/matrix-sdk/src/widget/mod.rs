@@ -3,6 +3,7 @@
 //#![warn(unreachable_pub)]
 
 use async_channel::{Receiver, Sender};
+use tokio::sync::mpsc::unbounded_channel;
 
 use self::client::{run as client_widget_api, MatrixDriver};
 use crate::room::Room;
@@ -13,6 +14,7 @@ mod messages;
 mod permissions;
 mod widget_settings;
 
+use self::client::{Action, ClientApi, Event};
 pub use self::{
     filter::{EventFilter, MessageLikeEventFilter, StateEventFilter},
     permissions::{Permissions, PermissionsProvider},

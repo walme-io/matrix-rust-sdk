@@ -21,7 +21,7 @@ use matrix_sdk::{
                 avatar::ImageInfo as RumaAvatarImageInfo,
                 message::{
                     AddMentions, ForwardThread, LocationMessageEventContent, MessageType, Relation,
-                    RoomMessageEvent, RoomMessageEventContentWithoutRelation,
+                    RoomMessageEventContentWithoutRelation,
                 },
             },
             AnyMessageLikeEventContent,
@@ -419,7 +419,7 @@ impl Room {
         })
     }
 
-    pub fn send(&self, msg: Arc<RoomMessageEventContentWithoutRelation>, txn_id: Option<String>) {
+    pub fn send(&self, msg: Arc<RoomMessageEventContentWithoutRelation>) {
         let timeline = match &*RUNTIME.block_on(self.timeline.read()) {
             Some(t) => Arc::clone(t),
             None => {
@@ -429,12 +429,7 @@ impl Room {
         };
 
         RUNTIME.spawn(async move {
-            timeline
-                .send(
-                    (*msg).to_owned().with_relation(None).into(),
-                    txn_id.as_deref().map(Into::into),
-                )
-                .await;
+            timeline.send((*msg).to_owned().with_relation(None).into()).await;
         });
     }
 
@@ -444,7 +439,6 @@ impl Room {
         answers: Vec<String>,
         max_selections: u8,
         poll_kind: PollKind,
-        txn_id: Option<String>,
     ) -> Result<(), ClientError> {
         let timeline = match &*RUNTIME.block_on(self.timeline.read()) {
             Some(t) => Arc::clone(t),
@@ -477,7 +471,7 @@ impl Room {
             AnyMessageLikeEventContent::UnstablePollStart(poll_start_event_content.into());
 
         RUNTIME.spawn(async move {
-            timeline.send(event_content, txn_id.as_deref().map(Into::into)).await;
+            timeline.send(event_content).await;
         });
 
         Ok(())
@@ -487,7 +481,6 @@ impl Room {
         &self,
         poll_start_id: String,
         answers: Vec<String>,
-        txn_id: Option<String>,
     ) -> Result<(), ClientError> {
         let timeline = match &*RUNTIME.block_on(self.timeline.read()) {
             Some(t) => Arc::clone(t),
@@ -504,18 +497,13 @@ impl Room {
             AnyMessageLikeEventContent::UnstablePollResponse(poll_response_event_content);
 
         RUNTIME.spawn(async move {
-            timeline.send(event_content, txn_id.as_deref().map(Into::into)).await;
+            timeline.send(event_content).await;
         });
 
         Ok(())
     }
 
-    pub fn end_poll(
-        &self,
-        poll_start_id: String,
-        text: String,
-        txn_id: Option<String>,
-    ) -> Result<(), ClientError> {
+    pub fn end_poll(&self, poll_start_id: String, text: String) -> Result<(), ClientError> {
         let timeline = match &*RUNTIME.block_on(self.timeline.read()) {
             Some(t) => Arc::clone(t),
             None => {
@@ -529,7 +517,7 @@ impl Room {
         let event_content = AnyMessageLikeEventContent::UnstablePollEnd(poll_end_event_content);
 
         RUNTIME.spawn(async move {
-            timeline.send(event_content, txn_id.as_deref().map(Into::into)).await;
+            timeline.send(event_content).await;
         });
 
         Ok(())
@@ -538,39 +526,25 @@ impl Room {
     pub fn send_reply(
         &self,
         msg: Arc<RoomMessageEventContentWithoutRelation>,
-        in_reply_to_event_id: String,
-        txn_id: Option<String>,
+        reply_item: Arc<EventTimelineItem>,
     ) -> Result<(), ClientError> {
         let timeline = match &*RUNTIME.block_on(self.timeline.read()) {
             Some(t) => Arc::clone(t),
             None => return Err(anyhow!("Timeline not set up, can't send message").into()),
         };
 
-        let event_id: &EventId =
-            in_reply_to_event_id.as_str().try_into().context("Failed to create EventId.")?;
-
-        let reply_content = RUNTIME.block_on(async move {
-            let timeline_event =
-                self.inner.event(event_id).await.context("Couldn't find event.")?;
-
-            let event_content = timeline_event
-                .event
-                .deserialize_as::<RoomMessageEvent>()
-                .context("Couldn't deserialize event")?;
-
-            let original_message =
-                event_content.as_original().context("Couldn't retrieve original message.")?;
-
-            anyhow::Ok((*msg).to_owned().with_relation(None).make_reply_to(
-                original_message,
-                ForwardThread::Yes,
-                AddMentions::No,
-            ))
+        RUNTIME.block_on(async move {
+            timeline
+                .send_reply(
+                    (*msg).clone().with_relation(None),
+                    &reply_item.0,
+                    ForwardThread::Yes,
+                    AddMentions::No,
+                )
+                .await?;
+            anyhow::Ok(())
         })?;
 
-        RUNTIME.spawn(async move {
-            timeline.send(reply_content.into(), txn_id.as_deref().map(Into::into)).await;
-        });
         Ok(())
     }
 
@@ -578,7 +552,6 @@ impl Room {
         &self,
         new_msg: Arc<RoomMessageEventContentWithoutRelation>,
         original_event_id: String,
-        txn_id: Option<String>,
     ) -> Result<(), ClientError> {
         let timeline = match &*RUNTIME.block_on(self.timeline.read()) {
             Some(t) => Arc::clone(t),
@@ -591,7 +564,7 @@ impl Room {
         )));
 
         RUNTIME.spawn(async move {
-            timeline.send(edited_content.into(), txn_id.as_deref().map(Into::into)).await;
+            timeline.send(edited_content.into()).await;
         });
         Ok(())
     }
@@ -603,18 +576,11 @@ impl Room {
     /// * `event_id` - The ID of the event to redact
     ///
     /// * `reason` - The reason for the event being redacted (optional).
-    ///
-    /// * `txn_id` - A unique ID that can be attached to this event as
     /// its transaction ID (optional). If not given one is created.
-    pub fn redact(
-        &self,
-        event_id: String,
-        reason: Option<String>,
-        txn_id: Option<String>,
-    ) -> Result<(), ClientError> {
+    pub fn redact(&self, event_id: String, reason: Option<String>) -> Result<(), ClientError> {
         RUNTIME.block_on(async move {
             let event_id = EventId::parse(event_id)?;
-            self.inner.redact(&event_id, reason.as_deref(), txn_id.map(Into::into)).await?;
+            self.inner.redact(&event_id, reason.as_deref(), None).await?;
             Ok(())
         })
     }
@@ -923,7 +889,6 @@ impl Room {
         description: Option<String>,
         zoom_level: Option<u8>,
         asset_type: Option<AssetType>,
-        txn_id: Option<String>,
     ) {
         let mut location_event_message_content =
             LocationMessageEventContent::new(body, geo_uri.clone());
@@ -941,7 +906,7 @@ impl Room {
         let room_message_event_content = RoomMessageEventContentWithoutRelation::new(
             MessageType::Location(location_event_message_content),
         );
-        self.send(Arc::new(room_message_event_content), txn_id)
+        self.send(Arc::new(room_message_event_content))
     }
 
     pub fn cancel_send(&self, txn_id: String) {
@@ -958,6 +923,29 @@ impl Room {
                 info!(txn_id, "Failed to discard local echo: Not found");
             }
         });
+    }
+
+    pub fn get_event_timeline_item_by_event_id(
+        &self,
+        event_id: String,
+    ) -> Result<Arc<EventTimelineItem>, ClientError> {
+        RUNTIME.block_on(async move {
+            let timeline = self
+                .timeline
+                .read()
+                .await
+                .clone()
+                .context("Timeline not set up, can't get event ")?;
+
+            let event_id = EventId::parse(event_id)?;
+
+            let item = timeline
+                .item_by_event_id(&event_id)
+                .await
+                .context("Item with given event ID not found")?;
+
+            Ok(Arc::new(EventTimelineItem(item)))
+        })
     }
 
     pub fn get_timeline_event_content_by_event_id(

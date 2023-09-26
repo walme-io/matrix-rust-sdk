@@ -41,7 +41,12 @@ use ruma::{
         reaction::ReactionEventContent,
         receipt::{Receipt, ReceiptThread},
         relation::Annotation,
-        room::redaction::RoomRedactionEventContent,
+        room::{
+            message::{
+                AddMentions, ForwardThread, OriginalRoomMessageEvent, RoomMessageEventContent,
+            },
+            redaction::RoomRedactionEventContent,
+        },
         AnyMessageLikeEventContent,
     },
     EventId, OwnedEventId, OwnedTransactionId, TransactionId, UserId,
@@ -51,6 +56,7 @@ use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info, instrument, warn};
 
 mod builder;
+mod error;
 mod event_handler;
 mod event_item;
 mod futures;
@@ -72,6 +78,7 @@ mod virtual_item;
 
 pub use self::{
     builder::TimelineBuilder,
+    error::{Error, UnsupportedReplyItem},
     event_item::{
         AnyOtherFullStateEventContent, BundledReactions, EncryptedMessage, EventItemOrigin,
         EventSendState, EventTimelineItem, InReplyToDetails, MemberProfileChange, MembershipChange,
@@ -347,12 +354,78 @@ impl Timeline {
     /// [`MessageLikeUnsigned`]: ruma::events::MessageLikeUnsigned
     /// [`SyncMessageLikeEvent`]: ruma::events::SyncMessageLikeEvent
     #[instrument(skip(self, content), fields(room_id = ?self.room().room_id()))]
-    pub async fn send(&self, content: AnyMessageLikeEventContent, txn_id: Option<&TransactionId>) {
-        let txn_id = txn_id.map_or_else(TransactionId::new, ToOwned::to_owned);
+    pub async fn send(&self, content: AnyMessageLikeEventContent) {
+        let txn_id = TransactionId::new();
         self.inner.handle_local_event(txn_id.clone(), content.clone()).await;
         if self.msg_sender.send(LocalMessage { content, txn_id }).await.is_err() {
             error!("Internal error: timeline message receiver is closed");
         }
+    }
+
+    /// Send a reply to the given event.
+    ///
+    /// Currently only supports events events with an event ID and JSON being
+    /// available (which can be removed by local redactions). This is subject to
+    /// change. Please check [`EventTimelineItem::can_be_replied_to`] to decide
+    /// whether to render a reply button.
+    ///
+    /// # Arguments
+    ///
+    /// * `content` - The content of the reply
+    ///
+    /// * `reply_item` - The event item you want to reply to
+    ///
+    /// * `forward_thread` - Usually `Yes`, unless you explicitly want to the
+    ///   reply to show up in the main timeline even though the `reply_item` is
+    ///   part of a thread
+    ///
+    /// * `add_mentions` - Set to `Yes` if the `mentions` of `content` are
+    ///   propagated according to user intent, `No` otherwise
+    ///
+    /// * `txn_id` - Optional transaction ID, usually `None`
+    #[instrument(skip(self, content, reply_item))]
+    pub async fn send_reply(
+        &self,
+        content: RoomMessageEventContent,
+        reply_item: &EventTimelineItem,
+        forward_thread: ForwardThread,
+        add_mentions: AddMentions,
+    ) -> Result<(), UnsupportedReplyItem> {
+        // Error returns here must be in sync with
+        // `EventTimelineItem::can_be_replied_to`
+        let Some(event_id) = reply_item.event_id() else {
+            return Err(UnsupportedReplyItem::MISSING_EVENT_ID);
+        };
+
+        let content = match reply_item.content() {
+            TimelineItemContent::Message(msg) => {
+                let event = OriginalRoomMessageEvent {
+                    event_id: event_id.to_owned(),
+                    sender: reply_item.sender().to_owned(),
+                    origin_server_ts: reply_item.timestamp(),
+                    room_id: self.room().room_id().to_owned(),
+                    content: msg.to_content(),
+                    unsigned: Default::default(),
+                };
+                content.make_reply_to(&event, forward_thread, add_mentions)
+            }
+            _ => {
+                let Some(raw_event) = reply_item.latest_json() else {
+                    return Err(UnsupportedReplyItem::MISSING_JSON);
+                };
+
+                content.make_reply_to_raw(
+                    raw_event,
+                    event_id.to_owned(),
+                    self.room().room_id(),
+                    forward_thread,
+                    add_mentions,
+                )
+            }
+        };
+
+        self.send(content.into()).await;
+        Ok(())
     }
 
     /// Toggle a reaction on an event
@@ -713,45 +786,4 @@ pub enum BackPaginationStatus {
     Idle,
     Paginating,
     TimelineStartReached,
-}
-
-/// Errors specific to the timeline.
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum Error {
-    /// The requested event with a remote echo is not in the timeline.
-    #[error("Event with remote echo not found in timeline")]
-    RemoteEventNotInTimeline,
-
-    /// Can't find an event with the given transaction ID, can't retry.
-    #[error("Event not found, can't retry sending")]
-    RetryEventNotInTimeline,
-
-    /// The event is currently unsupported for this use case.
-    #[error("Unsupported event")]
-    UnsupportedEvent,
-
-    /// Couldn't read the attachment data from the given URL
-    #[error("Invalid attachment data")]
-    InvalidAttachmentData,
-
-    /// The attachment file name used as a body is invalid
-    #[error("Invalid attachment file name")]
-    InvalidAttachmentFileName,
-
-    /// The attachment could not be sent
-    #[error("Failed sending attachment")]
-    FailedSendingAttachment,
-
-    /// The reaction could not be toggled
-    #[error("Failed toggling reaction")]
-    FailedToToggleReaction,
-
-    /// The room is not in a joined state.
-    #[error("Room is not joined")]
-    RoomNotJoined,
-
-    /// Could not get user
-    #[error("User ID is not available")]
-    UserIdNotAvailable,
 }
