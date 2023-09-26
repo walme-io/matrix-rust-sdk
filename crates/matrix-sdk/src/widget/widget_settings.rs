@@ -1,4 +1,3 @@
-use backoff::default;
 use language_tags::LanguageTag;
 use ruma::api::client::profile::get_profile;
 use url::Url;
