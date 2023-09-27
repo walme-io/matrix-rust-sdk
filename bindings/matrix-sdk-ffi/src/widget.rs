@@ -115,7 +115,7 @@ impl From<url::ParseError> for ParseError {
 /// * `room` - A matrix room which is used to query the logged in username
 /// * `props` - Propertis from the client that can be used by a widget to
 ///   adapt to the client. e.g. language, font-scale...
-#[uniffi::export]
+#[uniffi::export(async_runtime = "tokio")]
 pub async fn generate_url(
     widget_settings: WidgetSettings,
     room: Arc<Room>,
@@ -307,7 +307,7 @@ impl matrix_sdk::widget::PermissionsProvider for PermissionsProviderWrap {
     }
 }
 
-#[uniffi::export]
+#[uniffi::export(async_runtime = "tokio")]
 pub async fn run_client_widget_api(
     room: Arc<Room>,
     widget: Widget,
