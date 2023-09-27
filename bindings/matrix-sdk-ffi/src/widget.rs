@@ -198,6 +198,25 @@ impl From<ClientProperties> for matrix_sdk::widget::ClientProperties {
 #[derive(uniffi::Object)]
 pub struct WidgetComm(matrix_sdk::widget::Comm);
 
+#[uniffi::export(async_runtime = "tokio")]
+impl WidgetComm {
+    /// Receive a message from the widget driver.
+    ///
+    /// Resolves once a message is available, returns `None` if the widget
+    /// driver has died.
+    pub async fn recv(&self) -> Option<String> {
+        self.0.from.recv().await.ok()
+    }
+
+    /// Send a message to the widget driver.
+    ///
+    /// Returns `true` if the message was successfully sent. `false` indicates
+    /// that the widget driver has died.
+    pub async fn send(&self, msg: String) -> bool {
+        self.0.to.send(msg).await.is_ok()
+    }
+}
+
 /// Permissions that a widget can request from a client.
 #[derive(uniffi::Record)]
 pub struct WidgetPermissions {
@@ -206,7 +225,7 @@ pub struct WidgetPermissions {
     /// Types of the messages that a widget wants to be able to send.
     pub send: Vec<WidgetEventFilter>,
     /// If a widget requests this capability, the client is not allowed
-    /// to open the widget in a seperated browser.
+    /// to open the widget in a separated browser.
     pub requires_client: bool,
 }
 
