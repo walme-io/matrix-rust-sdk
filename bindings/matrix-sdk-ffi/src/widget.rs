@@ -1,26 +1,48 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use matrix_sdk::{
     async_trait,
     widget::{MessageLikeEventFilter, StateEventFilter},
 };
+use tracing::error;
 
 use crate::room::Room;
 
 #[derive(uniffi::Record)]
-pub struct Widget {
-    /// Settings for the widget.
-    pub settings: WidgetSettings,
-    /// Communication channels with a widget.
-    pub comm: Arc<WidgetComm>,
+pub struct WidgetDriverAndHandle {
+    pub driver: Arc<WidgetDriver>,
+    pub handle: Arc<WidgetDriverHandle>,
 }
 
-impl From<Widget> for matrix_sdk::widget::Widget {
-    fn from(value: Widget) -> Self {
-        let comm = &value.comm.0;
-        Self {
-            settings: value.settings.into(),
-            comm: matrix_sdk::widget::Comm { from: comm.from.clone(), to: comm.to.clone() },
+#[uniffi::export]
+pub fn make_widget_driver(settings: WidgetSettings) -> WidgetDriverAndHandle {
+    let (driver, handle) = matrix_sdk::widget::WidgetDriver::new(settings.into());
+    WidgetDriverAndHandle {
+        driver: Arc::new(WidgetDriver(Mutex::new(Some(driver)))),
+        handle: Arc::new(WidgetDriverHandle(handle)),
+    }
+}
+
+/// An object that handles all interactions of a widget living inside a webview
+/// or IFrame with the Matrix world.
+#[derive(uniffi::Object)]
+pub struct WidgetDriver(Mutex<Option<matrix_sdk::widget::WidgetDriver>>);
+
+#[uniffi::export(async_runtime = "tokio")]
+impl WidgetDriver {
+    pub async fn run(
+        &self,
+        room: Arc<Room>,
+        permissions_provider: Box<dyn WidgetPermissionsProvider>,
+    ) {
+        let Some(driver) = self.0.lock().unwrap().take() else {
+            error!("Can't call run multiple times on a WidgetDriver");
+            return;
+        };
+
+        let permissions_provider = PermissionsProviderWrap(permissions_provider.into());
+        if let Err(()) = driver.run(room.inner.clone(), permissions_provider).await {
+            // TODO
         }
     }
 }
@@ -52,7 +74,6 @@ impl From<WidgetSettings> for matrix_sdk::widget::WidgetSettings {
         matrix_sdk::widget::WidgetSettings::new(id, init_after_content_load, raw_url)
     }
 }
-
 impl From<matrix_sdk::widget::WidgetSettings> for WidgetSettings {
     fn from(value: matrix_sdk::widget::WidgetSettings) -> Self {
         let matrix_sdk::widget::WidgetSettings { id, init_after_content_load, raw_url } = value;
@@ -194,26 +215,28 @@ impl From<ClientProperties> for matrix_sdk::widget::ClientProperties {
         Self::new(&client_id, language_tag, theme)
     }
 }
-/// Communication "pipes" with a widget.
+
+/// A handle that encapsulates the communication between a widget driver and the
+/// corresponding widget (inside a webview or iframe).
 #[derive(uniffi::Object)]
-pub struct WidgetComm(matrix_sdk::widget::Comm);
+pub struct WidgetDriverHandle(matrix_sdk::widget::WidgetDriverHandle);
 
 #[uniffi::export(async_runtime = "tokio")]
-impl WidgetComm {
+impl WidgetDriverHandle {
     /// Receive a message from the widget driver.
     ///
-    /// Resolves once a message is available, returns `None` if the widget
-    /// driver has died.
+    /// The message must be passed on to the widget.
+    ///
+    /// Returns `None` if the widget driver is no longer running.
     pub async fn recv(&self) -> Option<String> {
-        self.0.from.recv().await.ok()
+        self.0.recv().await
     }
 
-    /// Send a message to the widget driver.
+    //// Send a message from the widget to the widget driver.
     ///
-    /// Returns `true` if the message was successfully sent. `false` indicates
-    /// that the widget driver has died.
+    /// Returns `false` if the widget driver is no longer running.
     pub async fn send(&self, msg: String) -> bool {
-        self.0.to.send(msg).await.is_ok()
+        self.0.send(msg).await
     }
 }
 
@@ -224,9 +247,6 @@ pub struct WidgetPermissions {
     pub read: Vec<WidgetEventFilter>,
     /// Types of the messages that a widget wants to be able to send.
     pub send: Vec<WidgetEventFilter>,
-    /// If a widget requests this capability, the client is not allowed
-    /// to open the widget in a separated browser.
-    pub requires_client: bool,
 }
 
 impl From<WidgetPermissions> for matrix_sdk::widget::Permissions {
@@ -234,7 +254,6 @@ impl From<WidgetPermissions> for matrix_sdk::widget::Permissions {
         Self {
             read: value.read.into_iter().map(Into::into).collect(),
             send: value.send.into_iter().map(Into::into).collect(),
-            requires_client: value.requires_client,
         }
     }
 }
@@ -244,7 +263,6 @@ impl From<matrix_sdk::widget::Permissions> for WidgetPermissions {
         Self {
             read: value.read.into_iter().map(Into::into).collect(),
             send: value.send.into_iter().map(Into::into).collect(),
-            requires_client: value.requires_client,
         }
     }
 }
@@ -324,19 +342,4 @@ impl matrix_sdk::widget::PermissionsProvider for PermissionsProviderWrap {
             // propagate panics from the blocking task
             .unwrap()
     }
-}
-
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn run_client_widget_api(
-    room: Arc<Room>,
-    widget: Widget,
-    permissions_provider: Box<dyn WidgetPermissionsProvider>,
-) {
-    let permissions_provider = PermissionsProviderWrap(permissions_provider.into());
-    matrix_sdk::widget::run_client_widget_api(
-        widget.into(),
-        permissions_provider,
-        room.inner.clone(),
-    )
-    .await
 }

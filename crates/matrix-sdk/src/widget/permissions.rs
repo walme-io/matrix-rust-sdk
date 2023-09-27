@@ -26,9 +26,9 @@ pub struct Permissions {
     pub read: Vec<EventFilter>,
     /// Types of the messages that a widget wants to be able to send.
     pub send: Vec<EventFilter>,
-    /// If a widget requests this capability, the client is not allowed
-    /// to open the widget in a seperated browser.
-    pub requires_client: bool,
+    // If a widget requests this capability, the client is not allowed
+    // to open the widget in a seperated browser.
+    // pub requires_client: bool,
 }
 
 const SEND_EVENT: &str = "org.matrix.msc2762.send.event";
@@ -80,12 +80,14 @@ impl Serialize for Permissions {
             }
         }
 
-        let seq_len = self.requires_client as usize + self.read.len() + self.send.len();
+        let seq_len = self.read.len() + self.send.len();
         let mut seq = serializer.serialize_seq(Some(seq_len))?;
+        // let seq_len = self.requires_client as usize + self.read.len() + self.send.len();
+        // let mut seq = serializer.serialize_seq(Some(seq_len))?;
 
-        if self.requires_client {
-            seq.serialize_element(REQUIRES_CLIENT)?;
-        }
+        // if self.requires_client {
+        //     seq.serialize_element(REQUIRES_CLIENT)?;
+        // }
         for filter in &self.read {
             let name = match filter {
                 EventFilter::MessageLike(_) => READ_EVENT,
@@ -166,7 +168,7 @@ impl<'de> Deserialize<'de> for Permissions {
         let mut permissions = Permissions::default();
         for permission in Vec::<Permission>::deserialize(deserializer)? {
             match permission {
-                Permission::RequiresClient => permissions.requires_client = true,
+                Permission::RequiresClient => todo!(), //permissions.requires_client = true,
                 Permission::Read(filter) => permissions.read.push(filter),
                 Permission::Send(filter) => permissions.send.push(filter),
                 // ignore unknown permissions

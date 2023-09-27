@@ -11,7 +11,7 @@ pub(crate) use self::matrix::Driver as MatrixDriver;
 use self::{handler::MessageHandler, widget::WidgetProxy};
 use super::{
     messages::{Action, Message},
-    PermissionsProvider, Widget,
+    PermissionsProvider, WidgetDriver,
 };
 
 mod handler;
@@ -22,16 +22,16 @@ mod widget;
 /// `client`. Returns once the widget is disconnected.
 pub(super) async fn run<T: PermissionsProvider>(
     client: MatrixDriver<T>,
-    Widget { settings, comm }: Widget,
+    WidgetDriver { settings, from_widget_rx, to_widget_tx }: WidgetDriver,
 ) {
-    // A small proxy object to interract with a widget via high-level API.
-    let widget = Arc::new(WidgetProxy::new(settings, comm.to));
+    // A small proxy object to interact with a widget via high-level API.
+    let widget = Arc::new(WidgetProxy::new(settings, to_widget_tx));
 
     // Create a message handler (handles incoming requests from the widget).
     let handler = MessageHandler::new(client, widget.clone());
 
     // Receive a plain JSON message from a widget and parse it.
-    while let Ok(raw) = comm.from.recv().await {
+    while let Ok(raw) = from_widget_rx.recv().await {
         match from_json::<Message>(&raw) {
             // The message is valid, process it.
             Ok(msg) => match msg.action {

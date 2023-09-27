@@ -38,6 +38,7 @@ pub struct WidgetSettings {
     /// will become: `http://widget.domain?username=@user_matrix_id:server.domain`.
     pub raw_url: String,
 }
+
 impl WidgetSettings {
     /// Create the actual Url that can be used to setup the WebView or IFrame
     /// that contains the widget.
