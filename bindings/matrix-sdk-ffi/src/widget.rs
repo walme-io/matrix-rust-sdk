@@ -15,12 +15,12 @@ pub struct WidgetDriverAndHandle {
 }
 
 #[uniffi::export]
-pub fn make_widget_driver(settings: WidgetSettings) -> WidgetDriverAndHandle {
-    let (driver, handle) = matrix_sdk::widget::WidgetDriver::new(settings.into());
-    WidgetDriverAndHandle {
+pub fn make_widget_driver(settings: WidgetSettings) -> Result<WidgetDriverAndHandle, ParseError> {
+    let (driver, handle) = matrix_sdk::widget::WidgetDriver::new(settings.try_into()?);
+    Ok(WidgetDriverAndHandle {
         driver: Arc::new(WidgetDriver(Mutex::new(Some(driver)))),
         handle: Arc::new(WidgetDriverHandle(handle)),
-    }
+    })
 }
 
 /// An object that handles all interactions of a widget living inside a webview
@@ -68,63 +68,22 @@ pub struct WidgetSettings {
     raw_url: String,
 }
 
-impl From<WidgetSettings> for matrix_sdk::widget::WidgetSettings {
-    fn from(value: WidgetSettings) -> Self {
+impl TryFrom<WidgetSettings> for matrix_sdk::widget::WidgetSettings {
+    type Error = ParseError;
+
+    fn try_from(value: WidgetSettings) -> Result<Self, Self::Error> {
         let WidgetSettings { id, init_after_content_load, raw_url } = value;
-        matrix_sdk::widget::WidgetSettings::new(id, init_after_content_load, raw_url)
+        Ok(matrix_sdk::widget::WidgetSettings::new(id, init_after_content_load, &raw_url)?)
     }
 }
 impl From<matrix_sdk::widget::WidgetSettings> for WidgetSettings {
     fn from(value: matrix_sdk::widget::WidgetSettings) -> Self {
-        let matrix_sdk::widget::WidgetSettings { id, init_after_content_load, raw_url } = value;
+        let (id, init_after_content_load, raw_url) = (
+            value.id().to_owned(),
+            value.init_after_content_load(),
+            value.raw_url().as_str().to_string(),
+        );
         WidgetSettings { id, init_after_content_load: init_after_content_load, raw_url }
-    }
-}
-
-#[derive(Debug, thiserror::Error, uniffi::Error)]
-#[uniffi(flat_error)]
-pub enum ParseError {
-    #[error("empty host")]
-    EmptyHost,
-    #[error("invalid international domain name")]
-    IdnaError,
-    #[error("invalid port number")]
-    InvalidPort,
-    #[error("invalid IPv4 address")]
-    InvalidIpv4Address,
-    #[error("invalid IPv6 address")]
-    InvalidIpv6Address,
-    #[error("invalid domain character")]
-    InvalidDomainCharacter,
-    #[error("relative URL without a base")]
-    RelativeUrlWithoutBase,
-    #[error("relative URL with a cannot-be-a-base base")]
-    RelativeUrlWithCannotBeABaseBase,
-    #[error("a cannot-be-a-base URL doesn’t have a host to set")]
-    SetHostOnCannotBeABaseUrl,
-    #[error("URLs more than 4 GB are not supported")]
-    Overflow,
-    #[error("unkwon parse error")]
-    Other,
-}
-
-impl From<url::ParseError> for ParseError {
-    fn from(value: url::ParseError) -> Self {
-        match value {
-            url::ParseError::EmptyHost => Self::EmptyHost,
-            url::ParseError::IdnaError => Self::IdnaError,
-            url::ParseError::InvalidPort => Self::InvalidPort,
-            url::ParseError::InvalidIpv4Address => Self::InvalidIpv4Address,
-            url::ParseError::InvalidIpv6Address => Self::InvalidIpv6Address,
-            url::ParseError::InvalidDomainCharacter => Self::InvalidDomainCharacter,
-            url::ParseError::RelativeUrlWithoutBase => Self::RelativeUrlWithoutBase,
-            url::ParseError::RelativeUrlWithCannotBeABaseBase => {
-                Self::RelativeUrlWithCannotBeABaseBase
-            }
-            url::ParseError::SetHostOnCannotBeABaseUrl => Self::SetHostOnCannotBeABaseUrl,
-            url::ParseError::Overflow => Self::Overflow,
-            _ => Self::Other,
-        }
     }
 }
 
@@ -134,16 +93,16 @@ impl From<url::ParseError> for ParseError {
 /// # Arguments
 /// * `widget_settings` - The widget settings to generate the url for.
 /// * `room` - A matrix room which is used to query the logged in username
-/// * `props` - Propertis from the client that can be used by a widget to
+/// * `props` - Properties from the client that can be used by a widget to
 ///   adapt to the client. e.g. language, font-scale...
 #[uniffi::export(async_runtime = "tokio")]
-pub async fn generate_url(
+pub async fn generate_webview_url(
     widget_settings: WidgetSettings,
     room: Arc<Room>,
     props: ClientProperties,
 ) -> Result<String, ParseError> {
-    Ok(matrix_sdk::widget::WidgetSettings::generate_url(
-        &widget_settings.clone().into(),
+    Ok(matrix_sdk::widget::WidgetSettings::generate_webview_url(
+        &widget_settings.clone().try_into()?,
         &room.inner,
         props.into(),
     )
@@ -181,8 +140,8 @@ pub fn new_virtual_element_call_widget(
     confine_to_room: Option<bool>,
     fonts: Option<Vec<String>>,
     analytics_id: Option<String>,
-) -> WidgetSettings {
-    matrix_sdk::widget::WidgetSettings::new_virtual_element_call_widget(
+) -> Result<WidgetSettings, ParseError> {
+    Ok(matrix_sdk::widget::WidgetSettings::new_virtual_element_call_widget(
         element_call_url,
         widget_id,
         parent_url,
@@ -195,7 +154,7 @@ pub fn new_virtual_element_call_widget(
         fonts,
         analytics_id,
     )
-    .into()
+    .map(|w| w.into())?)
 }
 
 #[derive(uniffi::Record)]
@@ -341,5 +300,52 @@ impl matrix_sdk::widget::PermissionsProvider for PermissionsProviderWrap {
             .await
             // propagate panics from the blocking task
             .unwrap()
+    }
+}
+
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+#[uniffi(flat_error)]
+pub enum ParseError {
+    #[error("empty host")]
+    EmptyHost,
+    #[error("invalid international domain name")]
+    IdnaError,
+    #[error("invalid port number")]
+    InvalidPort,
+    #[error("invalid IPv4 address")]
+    InvalidIpv4Address,
+    #[error("invalid IPv6 address")]
+    InvalidIpv6Address,
+    #[error("invalid domain character")]
+    InvalidDomainCharacter,
+    #[error("relative URL without a base")]
+    RelativeUrlWithoutBase,
+    #[error("relative URL with a cannot-be-a-base base")]
+    RelativeUrlWithCannotBeABaseBase,
+    #[error("a cannot-be-a-base URL doesn’t have a host to set")]
+    SetHostOnCannotBeABaseUrl,
+    #[error("URLs more than 4 GB are not supported")]
+    Overflow,
+    #[error("unknown parse error")]
+    Other,
+}
+
+impl From<url::ParseError> for ParseError {
+    fn from(value: url::ParseError) -> Self {
+        match value {
+            url::ParseError::EmptyHost => Self::EmptyHost,
+            url::ParseError::IdnaError => Self::IdnaError,
+            url::ParseError::InvalidPort => Self::InvalidPort,
+            url::ParseError::InvalidIpv4Address => Self::InvalidIpv4Address,
+            url::ParseError::InvalidIpv6Address => Self::InvalidIpv6Address,
+            url::ParseError::InvalidDomainCharacter => Self::InvalidDomainCharacter,
+            url::ParseError::RelativeUrlWithoutBase => Self::RelativeUrlWithoutBase,
+            url::ParseError::RelativeUrlWithCannotBeABaseBase => {
+                Self::RelativeUrlWithCannotBeABaseBase
+            }
+            url::ParseError::SetHostOnCannotBeABaseUrl => Self::SetHostOnCannotBeABaseUrl,
+            url::ParseError::Overflow => Self::Overflow,
+            _ => Self::Other,
+        }
     }
 }

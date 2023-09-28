@@ -1,4 +1,4 @@
-//! A high-level (safer) API to interract with a widget.
+//! A high-level (safer) API to interact with a widget.
 
 use std::{collections::HashMap, result::Result as StdResult, sync::Mutex, time::Duration};
 
@@ -46,7 +46,7 @@ impl WidgetProxy {
     pub(crate) async fn send<T: OutgoingRequest>(&self, msg: T) -> Result<T::Response> {
         let id = Uuid::new_v4().to_string();
         let message = {
-            let header = Header::new(&id, &self.info.id);
+            let header = Header::new(&id, self.info.id());
             let action = Action::ToWidget(msg.into_action());
             to_json(&Message::new(header, action)).expect("Bug: can't serialise a message")
         };
@@ -118,11 +118,11 @@ impl WidgetProxy {
     /// Tells whether or not we should negotiate supported capabilities on
     /// `ContentLoad` or not (if `false`, they are negotiated right away).
     pub(crate) fn init_after_content_load(&self) -> bool {
-        self.info.init_after_content_load
+        self.info.init_after_content_load()
     }
 
     pub(crate) fn id(&self) -> &str {
-        &self.info.id
+        &self.info.id()
     }
 }
 

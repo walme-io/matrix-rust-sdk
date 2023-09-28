@@ -1,7 +1,6 @@
 //! Widget API implementation.
 
 use async_channel::{Receiver, Sender};
-use tokio::sync::mpsc::unbounded_channel;
 
 use crate::room::Room;
 

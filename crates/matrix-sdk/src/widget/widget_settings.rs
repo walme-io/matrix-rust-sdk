@@ -1,32 +1,89 @@
 use language_tags::LanguageTag;
 use ruma::api::client::profile::get_profile;
-use url::Url;
-use urlencoding::encode;
+use url::{form_urlencoded::Serializer, Url, UrlQuery};
 
 use crate::Room;
 
 mod url_props {
-    pub static WIDGET_ID: &str = "$matrix_widget_id";
-    pub static AVATAR_URL: &str = "$matrix_avatar_url";
-    pub static DISPLAY_NAME: &str = "$matrix_display_name";
-    pub static USER_ID: &str = "$matrix_user_id";
-    pub static ROOM_ID: &str = "$matrix_room_id";
-    pub static LANGUAGE: &str = "$org.matrix.msc2873.client_language";
-    pub static CLIENT_THEME: &str = "$org.matrix.msc2873.client_theme";
-    pub static CLIENT_ID: &str = "$org.matrix.msc2873.client_id";
-    pub static DEVICE_ID: &str = "$org.matrix.msc2873.matrix_device_id";
-    pub static BASE_URL: &str = "$org.matrix.msc4039.matrix_base_url";
+    use url::Url;
+    use urlencoding::encode;
+
+    pub struct QueryProperties {
+        pub(crate) widget_id: String,
+        pub(crate) avatar_url: String,
+        pub(crate) display_name: String,
+        pub(crate) user_id: String,
+        pub(crate) room_id: String,
+        pub(crate) language: String,
+        pub(crate) client_theme: String,
+        pub(crate) client_id: String,
+        pub(crate) device_id: String,
+        pub(crate) base_url: String,
+    }
+
+    pub fn replace_properties(url: &mut Url, props: QueryProperties) {
+        if let Some(query) = url.query() {
+            let query = query
+                .replace(WIDGET_ID.placeholder, &encode(&props.widget_id))
+                .replace(AVATAR_URL.placeholder, &encode(&props.avatar_url))
+                .replace(DEVICE_ID.placeholder, &encode(&props.device_id))
+                .replace(DISPLAY_NAME.placeholder, &encode(&props.display_name))
+                .replace(BASE_URL.placeholder, &encode(&props.base_url))
+                .replace(USER_ID.placeholder, &encode(&props.user_id))
+                .replace(ROOM_ID.placeholder, &encode(&props.room_id))
+                .replace(LANGUAGE.placeholder, &encode(&props.language))
+                .replace(CLIENT_THEME.placeholder, &encode(&props.client_theme))
+                .replace(CLIENT_ID.placeholder, &encode(&props.client_id));
+            url.set_query(Some(&query));
+        }
+    }
+    pub struct Property {
+        pub name: &'static str,
+        pub placeholder: &'static str,
+    }
+
+    pub static USER_ID: Property = Property { name: "userId", placeholder: "$matrix_user_id" };
+    pub static ROOM_ID: Property = Property { name: "roomId", placeholder: "$matrix_room_id" };
+    pub static WIDGET_ID: Property =
+        Property { name: "widgetId", placeholder: "$matrix_widget_id" };
+    pub static AVATAR_URL: Property =
+        Property { name: "avatarUrl", placeholder: "$matrix_avatar_url" };
+    pub static DISPLAY_NAME: Property =
+        Property { name: "displayname", placeholder: "$matrix_display_name" };
+    pub static LANGUAGE: Property =
+        Property { name: "lang", placeholder: "$org.matrix.msc2873.client_language" };
+    pub static CLIENT_THEME: Property =
+        Property { name: "theme", placeholder: "$org.matrix.msc2873.client_theme" };
+    pub static CLIENT_ID: Property =
+        Property { name: "clientId", placeholder: "$org.matrix.msc2873.client_id" };
+    pub static DEVICE_ID: Property =
+        Property { name: "deviceId", placeholder: "$org.matrix.msc2873.matrix_device_id" };
+    pub static BASE_URL: Property =
+        Property { name: "baseUrl", placeholder: "$org.matrix.msc4039.matrix_base_url" };
 }
 /// Settings of the widget.
 #[derive(Debug, Clone)]
 pub struct WidgetSettings {
+    id: String,
+
+    init_after_content_load: bool,
+
+    raw_url: Url,
+}
+
+impl WidgetSettings {
     /// Widget's unique identifier.
-    pub id: String,
+    pub fn id(&self) -> &String {
+        &self.id
+    }
 
     /// Whether or not the widget should be initialized on load message
     /// (`ContentLoad` message), or upon creation/attaching of the widget to
     /// the SDK's state machine that drives the API.
-    pub init_after_content_load: bool,
+
+    pub fn init_after_content_load(&self) -> bool {
+        self.init_after_content_load
+    }
 
     /// This contains the url from the widget state event.
     /// In this url placeholders can be used to pass information from the client
@@ -36,20 +93,25 @@ pub struct WidgetSettings {
     ///
     /// e.g `http://widget.domain?username=$userId`
     /// will become: `http://widget.domain?username=@user_matrix_id:server.domain`.
-    pub raw_url: String,
-}
+    pub fn raw_url(&self) -> &Url {
+        &self.raw_url
+    }
 
-impl WidgetSettings {
+    /// Get the base url of the widget. Used as the target for PostMessages.
+    /// It contains the schema and the authority e.g. `https://my.domain.org`
+    /// A postmessage would be send using: `postmessage(myMessage, widget_base_url)`
+    pub fn base_url(&self) -> Option<Url> {
+        base_url(self.raw_url.clone())
+    }
     /// Create the actual Url that can be used to setup the WebView or IFrame
     /// that contains the widget.
     ///
     /// # Arguments
     ///
     /// * `room` - A matrix room which is used to query the logged in username
-    /// * `props` - Propertis from the client that can be used by a widget to
+    /// * `props` - Properties from the client that can be used by a widget to
     ///   adapt to the client. e.g. language, font-scale...
-
-    pub async fn generate_url(
+    pub async fn generate_webview_url(
         &self,
         room: &Room,
         props: ClientProperties,
@@ -63,21 +125,21 @@ impl WidgetSettings {
         let avatar_url = profile.avatar_url.map(|url| url.to_string()).unwrap_or("".to_owned());
         let device_id = room.client().device_id().map(|d| d.to_string()).unwrap_or("".to_owned());
 
-        Url::parse(
-            &self
-                .raw_url
-                .as_str()
-                .replace(url_props::WIDGET_ID, &self.id)
-                .replace(url_props::AVATAR_URL, &avatar_url)
-                .replace(url_props::DEVICE_ID, &device_id)
-                .replace(url_props::DISPLAY_NAME, &profile.displayname.unwrap_or("".to_owned()))
-                .replace(url_props::BASE_URL, &encode(&room.client().homeserver().await.as_str()))
-                .replace(url_props::USER_ID, room.own_user_id().as_str())
-                .replace(url_props::ROOM_ID, &encode(room.room_id().as_str()))
-                .replace(url_props::LANGUAGE, props.language.as_str())
-                .replace(url_props::CLIENT_THEME, props.theme.as_str())
-                .replace(url_props::CLIENT_ID, &props.client_id),
-        )
+        let props = url_props::QueryProperties {
+            widget_id: self.id.clone(),
+            avatar_url,
+            display_name: profile.displayname.unwrap_or("".to_owned()),
+            user_id: room.own_user_id().to_string(),
+            room_id: room.room_id().to_string(),
+            language: props.language.to_string(),
+            client_theme: props.theme,
+            client_id: props.client_id,
+            device_id,
+            base_url: room.client().homeserver().await.to_string(),
+        };
+        let mut generated_url = self.raw_url.clone();
+        url_props::replace_properties(&mut generated_url, props);
+        Ok(generated_url)
     }
 
     /// `WidgetSettings` are usually created from a state event.
@@ -111,7 +173,7 @@ impl WidgetSettings {
     /// * `skip_lobby` Don't show the lobby and join the call immediately. (default: `false`)
     /// * `confine_to_room` Make it not possible to get to the calls list in the webview. (default: `true`)
     /// * `fonts` A list of fonts to adapt to ios/android system fonts. (default: `[]`)
-    /// * `analytics_id` - Can be used to pass a posthog id to element call.
+    /// * `analytics_id` - Can be used to pass a PostHog id to element call.
     pub fn new_virtual_element_call_widget(
         element_call_url: String,
         widget_id: String,
@@ -124,53 +186,70 @@ impl WidgetSettings {
         confine_to_room: Option<bool>,
         fonts: Option<Vec<String>>,
         analytics_id: Option<String>,
-    ) -> Self {
-        let mut raw_url = format!("{element_call_url}/room");
+    ) -> Result<Self, url::ParseError> {
+        let mut raw_url: Url = Url::parse(&format!("{element_call_url}/room"))?;
+        {
+            fn append_property(
+                query: &mut Serializer<'_, UrlQuery<'_>>,
+                prop: &url_props::Property,
+            ) {
+                query.append_pair(prop.name, prop.placeholder);
+            }
 
-        // Default widget url template parameters:
-        raw_url.push_str(&format!("?widgetId={}", url_props::WIDGET_ID));
-        raw_url.push_str(&format!("&userId={}", url_props::USER_ID));
-        raw_url.push_str(&format!("&deviceId={}", url_props::DEVICE_ID));
-        raw_url.push_str(&format!("&roomId={}", url_props::ROOM_ID));
-        raw_url.push_str(&format!("&lang={}", url_props::LANGUAGE));
-        raw_url.push_str(&format!("&theme={}", url_props::CLIENT_THEME));
-        raw_url.push_str(&format!("&baseUrl={}", url_props::BASE_URL));
+            let mut query = raw_url.query_pairs_mut();
 
-        // Custom element call url parameters:
-        raw_url
-            .push_str(&format!("&parentUrl={}", encode(&parent_url.unwrap_or(element_call_url))));
-        if app_prompt.unwrap_or(false) {
-            raw_url.push_str("&embed=")
+            // Default widget url template parameters:
+            append_property(&mut query, &url_props::WIDGET_ID);
+            append_property(&mut query, &url_props::USER_ID);
+            append_property(&mut query, &url_props::DEVICE_ID);
+            append_property(&mut query, &url_props::ROOM_ID);
+            append_property(&mut query, &url_props::LANGUAGE);
+            append_property(&mut query, &url_props::CLIENT_THEME);
+            append_property(&mut query, &url_props::BASE_URL);
         }
-        if hide_header.unwrap_or(true) {
-            raw_url.push_str("&hideHeader=")
-        }
-        if preload.unwrap_or(false) {
-            raw_url.push_str("&preload=")
-        }
-        if let Some(analytics_id) = analytics_id {
-            raw_url.push_str(&format!("&analyticsID={}", encode(&analytics_id)));
-        }
-        if let Some(scale) = font_scale {
-            raw_url.push_str(&format!("&fontScale={}", &scale.to_string()));
-        }
-        if skip_lobby.unwrap_or(false) {
-            raw_url.push_str("&skipLobby=");
-        }
-        if confine_to_room.unwrap_or(true) {
-            raw_url.push_str("&confineToRoom=");
-        }
-        if let Some(fonts) = fonts {
-            raw_url.push_str(&format!("&fonts={}", fonts.join(",")));
+        // Revert the encoding for the template parameters. So we can have a unified replace logic.
+        let mut raw_url =
+            Url::parse(&raw_url.as_str().replace("%24", "$")).expect("could not re-parse the url");
+        {
+            let mut query = raw_url.query_pairs_mut();
+
+            // Custom element call url parameters:
+            query.append_pair("parentUrl", &parent_url.unwrap_or(element_call_url));
+            if app_prompt.unwrap_or(false) {
+                query.append_pair("embed", "true");
+            }
+            query.append_pair("hideHeader", &hide_header.unwrap_or(true).to_string());
+            query.append_pair("preload", &preload.unwrap_or(false).to_string());
+            if let Some(analytics_id) = analytics_id {
+                query.append_pair("analyticsID", &analytics_id);
+            }
+            if let Some(scale) = font_scale {
+                query.append_pair("fontScale", &scale.to_string());
+            }
+            query.append_pair("skipLobby", &skip_lobby.unwrap_or(false).to_string());
+            query.append_pair("confineToRoom", &confine_to_room.unwrap_or(true).to_string());
+            if let Some(fonts) = fonts {
+                query.append_pair("fonts", &fonts.join(","));
+            }
         }
 
-        // for EC we always want init on load to be false
-        Self { id: widget_id, init_after_content_load: true, raw_url }
+        // Transform the url to a have al the params inside the fragment (to keep the traffic to the server minimal and particularly don't send any passwords)
+        if let Some(query) = raw_url.clone().query() {
+            raw_url.set_query(None);
+            raw_url.set_fragment(Some(&format!("?{}", query)));
+        }
+
+        // for EC we always want init on content load to be true.
+        Ok(Self { id: widget_id, init_after_content_load: true, raw_url })
     }
 
     /// Create a new WidgetSettings instance
-    pub fn new(id: String, init_after_content_load: bool, raw_url: String) -> Self {
-        Self { id, init_after_content_load, raw_url }
+    pub fn new(
+        id: String,
+        init_after_content_load: bool,
+        raw_url: &str,
+    ) -> Result<Self, url::ParseError> {
+        Ok(Self { id, init_after_content_load, raw_url: Url::parse(raw_url)? })
     }
     // TODO: add From<WidgetStateEvent> so that WidgetSetting can be build
     // by using the room state directly:
@@ -207,5 +286,88 @@ impl ClientProperties {
             client_id: client_id.to_owned(),
             theme: theme.unwrap_or(default_theme),
         }
+    }
+}
+
+fn base_url(mut url: Url) -> Option<Url> {
+    match url.path_segments_mut() {
+        Ok(mut path) => {
+            path.clear();
+        }
+        _ => return None,
+    }
+
+    url.set_query(None);
+    url.set_fragment(None);
+
+    Some(url)
+}
+
+#[cfg(test)]
+mod tests {
+    use url::Url;
+
+    use super::{
+        url_props::{replace_properties, QueryProperties},
+        WidgetSettings,
+    };
+
+    const EXAMPLE_URL: &str = "https://my.widget.org/custom/path?\
+    widgetId=$matrix_widget_id\
+    &deviceId=$org.matrix.msc2873.matrix_device_id\
+    &avatarUrl=$matrix_avatar_url\
+    &displayname=$matrix_display_name\
+    &lang=$org.matrix.msc2873.client_language\
+    &theme=$org.matrix.msc2873.client_theme\
+    &clientId=$org.matrix.msc2873.client_id\
+    &baseUrl=$org.matrix.msc4039.matrix_base_url";
+
+    fn get_example_url() -> Url {
+        Url::parse(EXAMPLE_URL).expect("EXAMPLE_URL is malformatted")
+    }
+
+    fn get_example_props() -> QueryProperties {
+        QueryProperties {
+            widget_id: String::from("!@/abc_widget_id"),
+            avatar_url: "!@/abc_avatar_url".to_owned(),
+            display_name: "!@/abc_display_name".to_owned(),
+            user_id: "!@/abc_user_id".to_owned(),
+            room_id: "!@/abc_room_id".to_owned(),
+            language: "!@/abc_language".to_owned(),
+            client_theme: "!@/abc_client_theme".to_owned(),
+            client_id: "!@/abc_client_id".to_owned(),
+            device_id: "!@/abc_device_id".to_owned(),
+            base_url: "!@/abc_base_url".to_owned(),
+        }
+    }
+    #[test]
+    fn replace_all_properties() {
+        let mut url = get_example_url();
+        const CONVERTED_URL: &str = "https://my.widget.org/custom/path?widgetId=%21%40%2Fabc_widget_id&deviceId=%21%40%2Fabc_device_id&avatarUrl=%21%40%2Fabc_avatar_url&displayname=%21%40%2Fabc_display_name&lang=%21%40%2Fabc_language&theme=%21%40%2Fabc_client_theme&clientId=%21%40%2Fabc_client_id&baseUrl=%21%40%2Fabc_base_url";
+        replace_properties(&mut url, get_example_props());
+        assert_eq!(url.as_str(), CONVERTED_URL);
+    }
+
+    #[test]
+    fn new_virtual_element_call_widget() {
+        const WIDGET_ID: &str = "1/@#w23";
+        let widget_settings = WidgetSettings::new_virtual_element_call_widget(
+            "https://call.element.io".to_owned(),
+            WIDGET_ID.to_owned(),
+            None,
+            Some(true),
+            Some(true),
+            None,
+            Some(true),
+            Some(false),
+            Some(true),
+            None,
+            None,
+        )
+        .expect("could not parse virtual element call widget");
+        assert_eq!(widget_settings.base_url().unwrap().as_str(), "https://call.element.io/");
+        assert_eq!(widget_settings.raw_url().as_str(), "https://call.element.io/room#?widgetId=$matrix_widget_id&userId=$matrix_user_id&deviceId=$org.matrix.msc2873.matrix_device_id&roomId=$matrix_room_id&lang=$org.matrix.msc2873.client_language&theme=$org.matrix.msc2873.client_theme&baseUrl=$org.matrix.msc4039.matrix_base_url&parentUrl=https%3A%2F%2Fcall.element.io&embed=true&hideHeader=true&preload=true&skipLobby=false&confineToRoom=true");
+        assert_eq!(widget_settings.id(), WIDGET_ID);
+        // assert_eq!(widget_settings.generate_webview_url(room, props), WIDGET_ID);
     }
 }
