@@ -224,9 +224,8 @@ impl WidgetSettings {
             let mut query = raw_url.query_pairs_mut();
 
             // Custom element call url parameters:
-            if app_prompt.unwrap_or(false) {
-                query.append_pair("embed", "true");
-            }
+
+            query.append_pair("appPrompt", &app_prompt.unwrap_or(false).to_string());
             query.append_pair("hideHeader", &hide_header.unwrap_or(true).to_string());
             query.append_pair("preload", &preload.unwrap_or(false).to_string());
             if let Some(analytics_id) = analytics_id {
