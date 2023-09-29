@@ -82,8 +82,9 @@ impl Serialize for Permissions {
 
         let seq_len = self.read.len() + self.send.len();
         let mut seq = serializer.serialize_seq(Some(seq_len))?;
-        // let seq_len = self.requires_client as usize + self.read.len() + self.send.len();
-        // let mut seq = serializer.serialize_seq(Some(seq_len))?;
+        // let seq_len = self.requires_client as usize + self.read.len() +
+        // self.send.len(); let mut seq =
+        // serializer.serialize_seq(Some(seq_len))?;
 
         // if self.requires_client {
         //     seq.serialize_element(REQUIRES_CLIENT)?;

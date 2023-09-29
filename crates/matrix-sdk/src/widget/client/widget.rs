@@ -106,8 +106,8 @@ impl WidgetProxy {
             // It's ok if send fails here, it just means that the widget has disconnected.
             let _ = tx.send(action);
         } else {
-            // TODO this does not compile with tauri. where we start tauri in a thread::spawn.
-            // self.send_error(
+            // TODO this does not compile with tauri. where we start tauri in a
+            // thread::spawn. self.send_error(
             //     serde_json::value::to_value(header).ok(),
             //     "Unexpected response from a widget",
             // )

@@ -126,20 +126,21 @@ impl WidgetDriver {
         //             }
         //             Action::AcquirePermissions(cmd) => {
         //                 let result = cmd.result(Err("not implemented".into()));
-        //                 events_tx.send(Event::PermissionsAcquired(result)).map_err(|_| ())?;
+        //
+        // events_tx.send(Event::PermissionsAcquired(result)).map_err(|_| ())?;
         //             }
         //             Action::GetOpenId(cmd) => {
         //                 let result = cmd.result(Err("not implemented".into()));
-        //                 events_tx.send(Event::OpenIdReceived(result)).map_err(|_| ())?;
-        //             }
+        //                 events_tx.send(Event::OpenIdReceived(result)).map_err(|_|
+        // ())?;             }
         //             Action::ReadMatrixEvent(cmd) => {
         //                 let result = cmd.result(Err("not implemented".into()));
-        //                 events_tx.send(Event::MatrixEventRead(result)).map_err(|_| ())?;
-        //             }
+        //                 events_tx.send(Event::MatrixEventRead(result)).map_err(|_|
+        // ())?;             }
         //             Action::SendMatrixEvent(cmd) => {
         //                 let result = cmd.result(Err("not implemented".into()));
-        //                 events_tx.send(Event::MatrixEventSent(result)).map_err(|_| ())?;
-        //             }
+        //                 events_tx.send(Event::MatrixEventSent(result)).map_err(|_|
+        // ())?;             }
         //             Action::Subscribe => {}
         //             Action::Unsubscribe => {}
         //         }

@@ -51,7 +51,8 @@ pub(super) async fn run<T: PermissionsProvider>(
                         | serde_json::Value::String(_)
                         | serde_json::Value::Object(_) => {
                             warn!("ERROR parsing response");
-                            //This cannot be send to the widget as a response, because it already contains a response field
+                            //This cannot be send to the widget as a response, because it already
+                            // contains a response field
                             widget
                                 .send_error(Some(json!({"widget_id": widget.id()})), e.to_string())
                                 .await;

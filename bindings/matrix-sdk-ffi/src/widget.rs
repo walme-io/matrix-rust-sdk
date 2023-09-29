@@ -93,8 +93,8 @@ impl From<matrix_sdk::widget::WidgetSettings> for WidgetSettings {
 /// # Arguments
 /// * `widget_settings` - The widget settings to generate the url for.
 /// * `room` - A matrix room which is used to query the logged in username
-/// * `props` - Properties from the client that can be used by a widget to
-///   adapt to the client. e.g. language, font-scale...
+/// * `props` - Properties from the client that can be used by a widget to adapt
+///   to the client. e.g. language, font-scale...
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn generate_webview_url(
     widget_settings: WidgetSettings,
@@ -118,15 +118,33 @@ pub async fn generate_webview_url(
 /// and to generate the correct url for the widget.
 ///
 /// # Arguments
-/// * `base_path` the path to the app e.g. https://call.element.io.
-/// * `id` the widget id.
-/// * `embed` the embed param for the widget.
-/// * `hide_header` for Element Call this defines if the branding header
-///   should be hidden.
-/// * `preload` if set, the lobby will be skipped and the widget will join
-///   the call on the `io.element.join` action.
-/// * `base_url` the url of the matrix homserver in use e.g. https://matrix-client.matrix.org.
-/// * `analytics_id` can be used to pass a posthog id to element call.
+/// * `element_call_url` - the url to the app e.g. https://call.element.io, https://call.element.dev
+/// * `id` - the widget id.
+/// * `parentUrl` - The url that is used as the target for the PostMessages
+///   sent by the widget (to the client). For a web app client this is the
+///   client url. In case of using other platforms the client most likely is
+///   setup up to listen to postmessages in the same webview the widget is
+///   hosted. In this case the parent_url is set to the url of the webview
+///   with the widget. Be aware, that this means, the widget will receive
+///   its own postmessage messages. The matrix-widget-api (js) ignores those
+///   so this works but it might break custom implementations. So always
+///   keep this in mind. Defaults to `element_call_url` for the non IFrame
+///   (dedicated webview) usecase.
+/// * `hide_header` - defines if the branding header of Element call should
+///   be hidden. (default: `true`)
+/// * `preload` - if set, the lobby will be skipped and the widget will join
+///   the call on the `io.element.join` action. (default: `false`)
+/// * `font_scale` - The font scale which will be used inside element call.
+///   (default: `1`)
+/// * `app_prompt` - whether element call should prompt the user to open in
+///   the browser or the app (default: `false`).
+/// * `skip_lobby` Don't show the lobby and join the call immediately.
+///   (default: `false`)
+/// * `confine_to_room` Make it not possible to get to the calls list in the
+///   webview. (default: `true`)
+/// * `fonts` A list of fonts to adapt to ios/android system fonts.
+///   (default: `[]`)
+/// * `analytics_id` - Can be used to pass a PostHog id to element call.
 #[uniffi::export]
 pub fn new_virtual_element_call_widget(
     element_call_url: String,
@@ -164,7 +182,8 @@ pub struct ClientProperties {
     client_id: String,
     /// The language tag the client is set to e.g. en-us. (defualt: `en-US`)
     language_tag: Option<String>,
-    /// A string describing the theme (dark, light) or org.example.dark. (default: `light`)
+    /// A string describing the theme (dark, light) or org.example.dark.
+    /// (default: `light`)
     theme: Option<String>,
 }
 
