@@ -120,30 +120,29 @@ pub async fn generate_webview_url(
 /// # Arguments
 /// * `element_call_url` - the url to the app e.g. https://call.element.io, https://call.element.dev
 /// * `id` - the widget id.
-/// * `parentUrl` - The url that is used as the target for the PostMessages
-///   sent by the widget (to the client). For a web app client this is the
-///   client url. In case of using other platforms the client most likely is
-///   setup up to listen to postmessages in the same webview the widget is
-///   hosted. In this case the parent_url is set to the url of the webview
-///   with the widget. Be aware, that this means, the widget will receive
-///   its own postmessage messages. The matrix-widget-api (js) ignores those
-///   so this works but it might break custom implementations. So always
-///   keep this in mind. Defaults to `element_call_url` for the non IFrame
-///   (dedicated webview) usecase.
-/// * `hide_header` - defines if the branding header of Element call should
-///   be hidden. (default: `true`)
-/// * `preload` - if set, the lobby will be skipped and the widget will join
-///   the call on the `io.element.join` action. (default: `false`)
+/// * `parentUrl` - The url that is used as the target for the PostMessages sent
+///   by the widget (to the client). For a web app client this is the client
+///   url. In case of using other platforms the client most likely is setup up
+///   to listen to postmessages in the same webview the widget is hosted. In
+///   this case the parent_url is set to the url of the webview with the widget.
+///   Be aware, that this means, the widget will receive its own postmessage
+///   messages. The matrix-widget-api (js) ignores those so this works but it
+///   might break custom implementations. So always keep this in mind. Defaults
+///   to `element_call_url` for the non IFrame (dedicated webview) usecase.
+/// * `hide_header` - defines if the branding header of Element call should be
+///   hidden. (default: `true`)
+/// * `preload` - if set, the lobby will be skipped and the widget will join the
+///   call on the `io.element.join` action. (default: `false`)
 /// * `font_scale` - The font scale which will be used inside element call.
 ///   (default: `1`)
-/// * `app_prompt` - whether element call should prompt the user to open in
-///   the browser or the app (default: `false`).
-/// * `skip_lobby` Don't show the lobby and join the call immediately.
-///   (default: `false`)
+/// * `app_prompt` - whether element call should prompt the user to open in the
+///   browser or the app (default: `false`).
+/// * `skip_lobby` Don't show the lobby and join the call immediately. (default:
+///   `false`)
 /// * `confine_to_room` Make it not possible to get to the calls list in the
 ///   webview. (default: `true`)
-/// * `fonts` A list of fonts to adapt to ios/android system fonts.
-///   (default: `[]`)
+/// * `fonts` A list of fonts to adapt to ios/android system fonts. (default:
+///   `[]`)
 /// * `analytics_id` - Can be used to pass a PostHog id to element call.
 #[uniffi::export]
 pub fn new_virtual_element_call_widget(
@@ -180,7 +179,7 @@ pub struct ClientProperties {
     /// The client_id provides the widget with the option to behave differently
     /// for different clients. e.g org.example.ios.
     client_id: String,
-    /// The language tag the client is set to e.g. en-us. (defualt: `en-US`)
+    /// The language tag the client is set to e.g. en-us. (default: `en-US`)
     language_tag: Option<String>,
     /// A string describing the theme (dark, light) or org.example.dark.
     /// (default: `light`)
