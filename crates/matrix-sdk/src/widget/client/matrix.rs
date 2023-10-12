@@ -136,26 +136,27 @@ impl EventServerProxy {
 
     pub(crate) async fn read(&self, req: ReadEventRequest) -> Result<ReadEventResponse> {
         let limit = req.limit.unwrap_or(match req.state_key {
-            Some(..) => 50, // Default state events limit.
-            None => 50,     // Default message-like events limit.
+            Some(..) => 100, // Default state events limit.
+            None => 100,     // Default message-like events limit.
         });
         let event_type = req.event_type.to_string();
 
         let pack_state_events =
             |events: Result<Vec<RawAnySyncOrStrippedState>>| -> Result<ReadEventResponse> {
-                let events = events
-                    .unwrap()
-                    .into_iter()
-                    .filter_map(|ev| match ev {
-                        RawAnySyncOrStrippedState::Sync(raw) => Some(attach_room_id(
-                            &raw.cast::<AnySyncTimelineEvent>(),
-                            self.room.room_id().as_str(),
-                        )),
-                        RawAnySyncOrStrippedState::Stripped(_) => None,
-                    })
-                    .take(limit.try_into().unwrap_or(50))
-                    .collect();
-                Ok(ReadEventResponse { events })
+                let event_iter = events.unwrap().into_iter().filter_map(|ev| match ev {
+                    RawAnySyncOrStrippedState::Sync(raw) => Some(attach_room_id(
+                        &raw.cast::<AnySyncTimelineEvent>(),
+                        self.room.room_id().as_str(),
+                    )),
+                    RawAnySyncOrStrippedState::Stripped(_) => None,
+                });
+                if let Some(limit) = req.limit {
+                    return Ok(ReadEventResponse {
+                        events: event_iter.take(limit.try_into().unwrap_or(usize::MAX)).collect(),
+                    });
+                }
+
+                Ok(ReadEventResponse { events: event_iter.collect() })
             };
 
         match req.state_key {
