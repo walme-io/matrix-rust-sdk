@@ -1,3 +1,4 @@
+use matrix_sdk_base::deserialized_responses::RawAnySyncOrStrippedState;
 use ruma::{
     api::client::{
         account::request_openid_token::v3::Request as MatrixOpenIdRequest, filter::RoomEventFilter,
@@ -22,10 +23,19 @@ use crate::{
             },
             OpenIdState,
         },
-        Permissions, PermissionsProvider, StateEventFilter,
+        Permissions, PermissionsProvider,
     },
 };
 
+fn attach_room_id(raw_ev: &Raw<AnySyncTimelineEvent>, room_id: &str) -> Raw<AnyTimelineEvent> {
+    // deserialize should be possible if Raw<AnySyncTimelineEvent> is possible
+    let mut ev_value = raw_ev.deserialize_as::<serde_json::Value>().unwrap();
+    let ev_obj = ev_value.as_object_mut().unwrap();
+    ev_obj.insert("room_id".to_owned(), room_id.to_owned().into());
+    let ev_with_room_id = serde_json::from_value::<Raw<AnyTimelineEvent>>(ev_value).unwrap();
+    info!("final Event: {}", ev_with_room_id.json());
+    ev_with_room_id
+}
 #[derive(Debug)]
 pub(crate) struct Driver<T> {
     /// The room this driver is attached to.
@@ -99,15 +109,7 @@ impl<T> Driver<T> {
             if let Ok(ev) = raw_ev.deserialize_as::<MatrixEventFilterInput>() {
                 filter.any_matches(&ev).then(|| {
                     info!("received event for room: {}", room_id.clone().as_str());
-                    // deserialize should be possible if Raw<AnySyncTimelineEvent> is possible
-                    let mut ev_value = raw_ev.deserialize_as::<serde_json::Value>().unwrap();
-                    let ev_obj = ev_value.as_object_mut().unwrap();
-                    ev_obj.insert("room_id".to_owned(), room_id.clone().into());
-                    let ev_with_room_id =
-                        serde_json::from_value::<Raw<AnyTimelineEvent>>(ev_value).unwrap();
-                    info!("final Event: {}", ev_with_room_id.json());
-
-                    tx.send(ev_with_room_id)
+                    tx.send(attach_room_id(&raw_ev, &room_id))
                 });
             }
             async {}
@@ -137,48 +139,67 @@ impl EventServerProxy {
             Some(..) => 50, // Default state events limit.
             None => 50,     // Default message-like events limit.
         });
+        let event_type = req.event_type.to_string();
 
-        let options = assign!(MessagesOptions::backward(), {
-            limit: limit.into(),
-            filter: assign!(RoomEventFilter::default(), {
-                types: Some(vec![req.event_type.to_string()])
-            })
-        });
+        let pack_state_events =
+            |events: Result<Vec<RawAnySyncOrStrippedState>>| -> Result<ReadEventResponse> {
+                let events = events
+                    .unwrap()
+                    .into_iter()
+                    .filter_map(|ev| match ev {
+                        RawAnySyncOrStrippedState::Sync(raw) => Some(attach_room_id(
+                            &raw.cast::<AnySyncTimelineEvent>(),
+                            self.room.room_id().as_str(),
+                        )),
+                        RawAnySyncOrStrippedState::Stripped(_) => None,
+                    })
+                    .take(limit.try_into().unwrap_or(50))
+                    .collect();
+                Ok(ReadEventResponse { events })
+            };
 
-        // There may be an additional state key filter depending on the `req.state_key`.
-        let state_key_filter = move |ev: &MatrixEventFilterInput| -> bool {
-            if let Some(StateKeySelector::Key(state_key)) = req.state_key.clone() {
-                EventFilter::State(StateEventFilter::WithTypeAndStateKey(
-                    req.event_type.to_string().into(),
-                    state_key,
-                ))
-                .matches(ev)
-            } else {
-                true
+        match req.state_key {
+            Some(state_key) => match state_key {
+                StateKeySelector::Any(_) => {
+                    let events = self.room.get_state_events(event_type.into()).await;
+                    return pack_state_events(events.map_err(|e| Error::other(e)));
+                }
+                StateKeySelector::Key(state_key) => {
+                    let events = self
+                        .room
+                        .get_state_events_for_keys(event_type.into(), &[state_key.as_str()])
+                        .await;
+                    return pack_state_events(events.map_err(|e| Error::other(e)));
+                }
+            },
+            None => {
+                let options = assign!(MessagesOptions::backward(), {
+                    limit: limit.into(),
+                    filter: assign!(RoomEventFilter::default(), {
+                        types: Some(vec![req.event_type.to_string()])
+                    })
+                });
+                // get message like events
+                let messages = self.room.messages(options).await.map_err(Error::other)?;
+
+                // Filter the timeline events.
+                let events = messages
+                    .chunk
+                    .into_iter()
+                    .map(|ev| ev.event.cast())
+                    // TODO: Log events that failed to decrypt?
+                    .filter(|raw| match raw.deserialize_as() {
+                        Ok(de_helper) => self.filters.any_matches(&de_helper),
+                        Err(e) => {
+                            warn!("Failed to deserialize timeline event: {e}");
+                            false
+                        }
+                    })
+                    .collect();
+                Ok(ReadEventResponse { events })
             }
-        };
-
-        // Fetch messages from the server.
-        let messages = self.room.messages(options).await.map_err(Error::other)?;
-
-        // Filter the timeline events.
-        let events = messages
-            .chunk
-            .into_iter()
-            .map(|ev| ev.event.cast())
-            // TODO: Log events that failed to decrypt?
-            .filter(|raw| match raw.deserialize_as() {
-                Ok(de_helper) => {
-                    self.filters.any_matches(&de_helper) && state_key_filter(&de_helper)
-                }
-                Err(e) => {
-                    warn!("Failed to deserialize timeline event: {e}");
-                    false
-                }
-            })
-            .collect();
-
-        Ok(ReadEventResponse { events })
+        }
+        // There may be an additional state key filter depending on the `req.state_key`.
     }
 
     pub(crate) async fn send(&self, req: SendEventRequest) -> Result<SendEventResponse> {

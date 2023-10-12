@@ -83,6 +83,8 @@ pub(crate) enum StateKeySelector {
 pub(crate) struct ReadEventRequest {
     #[serde(rename = "type")]
     pub event_type: TimelineEventType,
+    // TODO: read events from different rooms if requested
+    pub room_ids: Vec<String>,
     pub limit: Option<u32>,
     pub state_key: Option<StateKeySelector>,
 }
