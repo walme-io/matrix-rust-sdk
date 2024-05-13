@@ -2617,4 +2617,61 @@ mod tests {
             .await
             .unwrap();
     }
+
+    #[cfg(all(feature = "sqlite", feature = "e2e-encryption"))]
+    #[async_test]
+    async fn test_sending_notify() {
+        use matrix_sdk_test::DEFAULT_TEST_ROOM_ID;
+        use serde_json::json;
+
+        let sqlite_path = std::env::temp_dir().join("cache_invalidation_while_encrypt.db");
+        let session = MatrixSession {
+            meta: SessionMeta {
+                user_id: user_id!("@example:localhost").to_owned(),
+                device_id: device_id!("DEVICEID").to_owned(),
+            },
+            tokens: MatrixSessionTokens { access_token: "1234".to_owned(), refresh_token: None },
+        };
+
+        let client = Client::builder()
+            .homeserver_url("http://localhost:1234")
+            .request_config(RequestConfig::new().disable_retry())
+            .sqlite_store(&sqlite_path, None)
+            .build()
+            .await
+            .unwrap();
+        client.matrix_auth().restore_session(session.clone()).await.unwrap();
+
+        // client.encryption().enable_cross_process_store_lock("client1".to_owned()).
+        // await.unwrap();
+
+        // // Mock receiving an event to create an internal room.
+        let server = MockServer::start().await;
+        {
+            Mock::given(method("PUT"))
+                .and(path_regex(r"^/_matrix/client/r0/rooms/.*/"))
+                .and(header("authorization", "Bearer 1234"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!(
+                    {
+                        "event_id": "$xxxxxx:example.org"
+                    }
+                )))
+                .mount(&server)
+                .await;
+            // let response = SyncResponseBuilder::default()
+            //     .add_joined_room(
+            //         JoinedRoomBuilder::default()
+            //             .add_state_event(StateTestEvent::Member)
+            //             .add_state_event(StateTestEvent::PowerLevels)
+            //             .add_state_event(StateTestEvent::Encryption),
+            //     )
+            //     .build_sync_response();
+            // client.base_client().receive_sync_response(response).await.
+            // unwrap();
+        }
+
+        let room = client.get_room(&DEFAULT_TEST_ROOM_ID).expect("Room should exist");
+        assert!(room.has_active_room_call());
+        //assert!(room.checked_send_room_call_notify().await.is_none());
+    }
 }
