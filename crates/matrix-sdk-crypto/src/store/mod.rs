@@ -40,7 +40,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    fmt::Debug,
+    fmt::{Debug, Formatter},
     ops::Deref,
     pin::pin,
     sync::{atomic::Ordering, Arc, RwLock as StdRwLock},
@@ -57,7 +57,7 @@ use ruma::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::{Mutex, MutexGuard, Notify, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use vodozemac::{base64_encode, megolm::SessionOrdering, Curve25519PublicKey};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -94,7 +94,7 @@ pub mod integration_tests;
 use caches::{SequenceNumber, UsersForKeyQuery};
 pub(crate) use crypto_store_wrapper::CryptoStoreWrapper;
 pub use error::{CryptoStoreError, Result};
-use matrix_sdk_common::{store_locks::CrossProcessStoreLock, timeout::timeout};
+use matrix_sdk_common::{store_locks::CrossProcessStoreLock, timeout::timeout, NoisyArc};
 pub use memorystore::MemoryStore;
 pub use traits::{CryptoStore, DynCryptoStore, IntoCryptoStore};
 
@@ -108,7 +108,7 @@ pub use crate::gossiping::{GossipRequest, SecretInfo};
 /// adds the generic interface on top.
 #[derive(Debug, Clone)]
 pub struct Store {
-    inner: Arc<StoreInner>,
+    inner: NoisyArc<StoreInner>,
 }
 
 #[derive(Debug, Default)]
@@ -346,7 +346,7 @@ impl<'a> SyncedKeyQueryManager<'a> {
 
 #[derive(Debug)]
 pub(crate) struct StoreCache {
-    store: Arc<CryptoStoreWrapper>,
+    store: NoisyArc<CryptoStoreWrapper>,
 
     tracked_users: StdRwLock<BTreeSet<OwnedUserId>>,
     loaded_tracked_users: RwLock<bool>,
@@ -474,10 +474,9 @@ impl StoreTransaction {
     }
 }
 
-#[derive(Debug)]
 struct StoreInner {
     identity: Arc<Mutex<PrivateCrossSigningIdentity>>,
-    store: Arc<CryptoStoreWrapper>,
+    store: NoisyArc<CryptoStoreWrapper>,
 
     /// In-memory cache for the current crypto store.
     ///
@@ -489,6 +488,18 @@ struct StoreInner {
     /// Static account data that never changes (and thus can be loaded once and
     /// for all when creating the store).
     static_account: StaticAccountData,
+}
+
+impl Debug for StoreInner {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoreInner").finish_non_exhaustive()
+    }
+}
+
+impl Drop for StoreInner {
+    fn drop(&mut self) {
+        info!("StoreInner::drop");
+    }
 }
 
 /// Aggregated changes to be saved in the database.
@@ -918,11 +929,11 @@ impl Store {
     pub(crate) fn new(
         account: StaticAccountData,
         identity: Arc<Mutex<PrivateCrossSigningIdentity>>,
-        store: Arc<CryptoStoreWrapper>,
+        store: NoisyArc<CryptoStoreWrapper>,
         verification_machine: VerificationMachine,
     ) -> Self {
         Self {
-            inner: Arc::new(StoreInner {
+            inner: NoisyArc::new_noisy(StoreInner {
                 static_account: account,
                 identity,
                 store: store.clone(),
@@ -1746,7 +1757,7 @@ impl Store {
         self.import_room_keys(exported_keys, None, progress_listener).await
     }
 
-    pub(crate) fn crypto_store(&self) -> Arc<CryptoStoreWrapper> {
+    pub(crate) fn crypto_store(&self) -> NoisyArc<CryptoStoreWrapper> {
         self.inner.store.clone()
     }
 

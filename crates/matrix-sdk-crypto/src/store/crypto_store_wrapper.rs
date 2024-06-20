@@ -1,8 +1,8 @@
-use std::{ops::Deref, sync::Arc};
+use std::ops::Deref;
 
 use futures_core::Stream;
 use futures_util::StreamExt;
-use matrix_sdk_common::store_locks::CrossProcessStoreLock;
+use matrix_sdk_common::{store_locks::CrossProcessStoreLock, NoisyArc};
 use ruma::{OwnedUserId, UserId};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
@@ -23,7 +23,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct CryptoStoreWrapper {
     user_id: OwnedUserId,
-    store: Arc<DynCryptoStore>,
+    store: NoisyArc<DynCryptoStore>,
 
     /// The sender side of a broadcast stream that is notified whenever we get
     /// an update to an inbound group session.
@@ -194,7 +194,9 @@ impl CryptoStoreWrapper {
         lock_key: String,
         lock_value: String,
     ) -> CrossProcessStoreLock<LockableCryptoStore> {
-        CrossProcessStoreLock::new(LockableCryptoStore(self.store.clone()), lock_key, lock_value)
+        panic!("Store.create_store_lock");
+        //CrossProcessStoreLock::new(LockableCryptoStore(self.store.clone()),
+        // lock_key, lock_value)
     }
 }
 

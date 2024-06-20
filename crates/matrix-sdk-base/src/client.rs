@@ -25,7 +25,7 @@ use eyeball::{SharedObservable, Subscriber};
 use eyeball_im::{Vector, VectorDiff};
 #[cfg(not(target_arch = "wasm32"))]
 use futures_util::Stream;
-use matrix_sdk_common::instant::Instant;
+use matrix_sdk_common::{instant::Instant, NoisyArc};
 #[cfg(feature = "e2e-encryption")]
 use matrix_sdk_crypto::{
     store::DynCryptoStore, EncryptionSettings, EncryptionSyncChanges, OlmError, OlmMachine,
@@ -92,7 +92,7 @@ pub struct BaseClient {
     /// This field is only meant to be used for `OlmMachine` initialization.
     /// All operations on it happen inside the `OlmMachine`.
     #[cfg(feature = "e2e-encryption")]
-    crypto_store: Arc<DynCryptoStore>,
+    crypto_store: NoisyArc<DynCryptoStore>,
     /// The olm-machine that is created once the
     /// [`SessionMeta`][crate::session::SessionMeta] is set via
     /// [`BaseClient::set_session_meta`]

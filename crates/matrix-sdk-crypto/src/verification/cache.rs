@@ -129,6 +129,7 @@ impl VerificationCache {
             .insert(verification.flow_id().to_owned(), verification.clone());
     }
 
+    #[tracing::instrument]
     pub fn get(&self, sender: &UserId, flow_id: &str) -> Option<Verification> {
         self.inner.verification.read().unwrap().get(sender)?.get(flow_id).cloned()
     }

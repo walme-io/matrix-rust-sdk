@@ -24,7 +24,7 @@ use matrix_sdk_common::{
         AlgorithmInfo, DeviceLinkProblem, EncryptionInfo, TimelineEvent, UnableToDecryptInfo,
         UnsignedDecryptionResult, UnsignedEventLocation, VerificationLevel, VerificationState,
     },
-    BoxFuture,
+    BoxFuture, NoisyArc,
 };
 use ruma::{
     api::client::{
@@ -134,6 +134,12 @@ pub struct OlmMachineInner {
     backup_machine: BackupMachine,
 }
 
+impl Drop for OlmMachineInner {
+    fn drop(&mut self) {
+        info!("OlmMachineInner::drop");
+    }
+}
+
 #[cfg(not(tarpaulin_include))]
 impl std::fmt::Debug for OlmMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -172,7 +178,7 @@ impl OlmMachine {
         let account = Account::rehydrate(pickle_key, self.user_id(), device_id, device_data)?;
         let static_account = account.static_data().clone();
 
-        let store = Arc::new(CryptoStoreWrapper::new(self.user_id(), MemoryStore::new()));
+        let store = NoisyArc::new(CryptoStoreWrapper::new(self.user_id(), MemoryStore::new()));
         store.save_pending_changes(PendingChanges { account: Some(account) }).await?;
 
         Ok(Self::new_helper(
@@ -186,13 +192,14 @@ impl OlmMachine {
 
     fn new_helper(
         device_id: &DeviceId,
-        store: Arc<CryptoStoreWrapper>,
+        store: NoisyArc<CryptoStoreWrapper>,
         account: StaticAccountData,
         user_identity: Arc<Mutex<PrivateCrossSigningIdentity>>,
         maybe_backup_key: Option<MegolmV1BackupKey>,
     ) -> Self {
         let verification_machine =
             VerificationMachine::new(account.clone(), user_identity.clone(), store.clone());
+
         let store = Store::new(account, user_identity.clone(), store, verification_machine.clone());
 
         let group_session_manager = GroupSessionManager::new(store.clone());
@@ -348,7 +355,7 @@ impl OlmMachine {
         });
 
         let identity = Arc::new(Mutex::new(identity));
-        let store = Arc::new(CryptoStoreWrapper::new(user_id, store));
+        let store = NoisyArc::new_noisy(CryptoStoreWrapper::new(user_id, store));
         Ok(OlmMachine::new_helper(device_id, store, static_account, identity, maybe_backup_key))
     }
 
@@ -1106,6 +1113,7 @@ impl OlmMachine {
     }
 
     /// Get a verification object for the given user id with the given flow id.
+    #[instrument(skip_all)]
     pub fn get_verification(&self, user_id: &UserId, flow_id: &str) -> Option<Verification> {
         self.inner.verification_machine.get_verification(user_id, flow_id)
     }
@@ -1932,14 +1940,20 @@ impl OlmMachine {
     ///
     /// Returns a `UserIdentities` enum if one is found and the crypto store
     /// didn't throw an error.
-    #[instrument(skip(self))]
+    #[instrument(skip(self), fields(uuid))]
     pub async fn get_identity(
         &self,
         user_id: &UserId,
         timeout: Option<Duration>,
     ) -> StoreResult<Option<UserIdentities>> {
+        let uuid = uuid::Uuid::new_v4();
+        tracing::Span::current().record("uuid", &uuid.to_string());
+        tracing::info!("get_identity 10");
         self.wait_if_user_pending(user_id, timeout).await?;
-        self.store().get_identity(user_id).await
+        tracing::info!("get_identity 20");
+        let r = self.store().get_identity(user_id).await;
+        tracing::info!("get_identity 30");
+        r
     }
 
     /// Get a map holding all the devices of an user.

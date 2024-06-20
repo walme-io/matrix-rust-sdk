@@ -25,6 +25,7 @@ use std::{collections::HashMap, ops::Deref, sync::Arc};
 use as_variant::as_variant;
 use event_enums::OutgoingContent;
 pub use machine::VerificationMachine;
+use matrix_sdk_common::NoisyArc;
 #[cfg(feature = "qrcode")]
 pub use qrcode::{QrVerification, QrVerificationState, ScanError};
 pub use requests::{VerificationRequest, VerificationRequestState};
@@ -63,7 +64,7 @@ use crate::{
 pub(crate) struct VerificationStore {
     pub account: StaticAccountData,
     pub private_identity: Arc<Mutex<PrivateCrossSigningIdentity>>,
-    inner: Arc<CryptoStoreWrapper>,
+    inner: NoisyArc<CryptoStoreWrapper>,
 }
 
 /// An emoji that is used for interactive verification using a short auth

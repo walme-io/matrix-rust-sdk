@@ -1019,6 +1019,7 @@ impl IdentityManager {
 pub(crate) mod testing {
     use std::sync::Arc;
 
+    use matrix_sdk_common::NoisyArc;
     use ruma::{
         api::{client::keys::get_keys::v3::Response as KeyQueryResponse, IncomingResponse},
         device_id, user_id, DeviceId, UserId,
@@ -1057,7 +1058,7 @@ pub(crate) mod testing {
         let user_id = user_id.to_owned();
         let account = Account::with_device_id(&user_id, device_id);
         let static_account = account.static_data().clone();
-        let store = Arc::new(CryptoStoreWrapper::new(&user_id, MemoryStore::new()));
+        let store = NoisyArc::new(CryptoStoreWrapper::new(&user_id, MemoryStore::new()));
         let verification =
             VerificationMachine::new(static_account.clone(), identity.clone(), store.clone());
         let store = Store::new(static_account, identity, store, verification);

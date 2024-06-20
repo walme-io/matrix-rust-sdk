@@ -1095,6 +1095,7 @@ mod tests {
 
     #[cfg(feature = "automatic-room-key-forwarding")]
     use assert_matches::assert_matches;
+    use matrix_sdk_common::NoisyArc;
     use matrix_sdk_test::{async_test, message_like_event_content};
     use ruma::{
         device_id, event_id,
