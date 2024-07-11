@@ -254,6 +254,7 @@ async fn migrate_data(
         uploaded_signed_key_count: data.account.uploaded_signed_key_count as u64,
         creation_local_time: MilliSecondsSinceUnixEpoch::now(),
         fallback_key_creation_timestamp: Some(MilliSecondsSinceUnixEpoch::now()),
+        client_data: None,
     };
     let account = matrix_sdk_crypto::olm::Account::from_pickle(pickled_account)?;
 

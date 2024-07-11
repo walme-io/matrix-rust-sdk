@@ -57,7 +57,7 @@ use ruma::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::{Mutex, MutexGuard, Notify, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use vodozemac::{base64_encode, megolm::SessionOrdering, Curve25519PublicKey};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -467,6 +467,7 @@ impl StoreTransaction {
 
         // Make the cache coherent with the database.
         if let Some(account) = account {
+            debug!(?account, "Saved changes to account");
             *self.cache.account.lock().await = Some(account);
         }
 

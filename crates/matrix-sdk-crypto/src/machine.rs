@@ -88,7 +88,7 @@ use crate::{
             },
             ToDeviceEvents,
         },
-        EventEncryptionAlgorithm, Signatures,
+        DeviceKeysClientData, EventEncryptionAlgorithm, Signatures,
     },
     utilities::timestamp_to_iso8601,
     verification::{Verification, VerificationMachine, VerificationRequest},
@@ -393,6 +393,20 @@ impl OlmMachine {
     /// Get the display name of our own device
     pub async fn display_name(&self) -> StoreResult<Option<String>> {
         self.store().device_display_name().await
+    }
+
+    pub async fn update_client_data(
+        &self,
+        client_data: Option<DeviceKeysClientData>,
+    ) -> OlmResult<()> {
+        self.inner
+            .store
+            .with_transaction(|mut tr| async {
+                let account = tr.account().await?;
+                account.update_client_data(client_data);
+                Ok((tr, ()))
+            })
+            .await
     }
 
     /// Get the list of "tracked users".

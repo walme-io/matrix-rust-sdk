@@ -72,7 +72,8 @@ use crate::{
                 ToDeviceEncryptedEventContent,
             },
         },
-        CrossSigningKey, DeviceKeys, EventEncryptionAlgorithm, MasterPubkey, OneTimeKey, SignedKey,
+        CrossSigningKey, DeviceKeys, DeviceKeysClientData, EventEncryptionAlgorithm, MasterPubkey,
+        OneTimeKey, SignedKey,
     },
     OlmError, SignatureError,
 };
@@ -329,6 +330,8 @@ pub struct Account {
     pub(crate) static_data: StaticAccountData,
     /// `vodozemac` account.
     inner: Box<InnerAccount>,
+    /// Optional information about the application.
+    client_data: Option<DeviceKeysClientData>,
     /// Is this account ready to encrypt messages? (i.e. has it shared keys with
     /// a homeserver)
     shared: bool,
@@ -370,6 +373,10 @@ pub struct PickledAccount {
     pub pickle: AccountPickle,
     /// Was the account shared.
     pub shared: bool,
+    /// Optional information about the client application to publish to the
+    /// server.
+    #[serde(default)]
+    pub client_data: Option<DeviceKeysClientData>,
     /// Whether this is for a dehydrated device
     #[serde(default)]
     pub dehydrated: bool,
@@ -393,6 +400,7 @@ impl fmt::Debug for Account {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Account")
             .field("identity_keys", &self.identity_keys())
+            .field("client_data", &self.client_data)
             .field("shared", &self.shared())
             .finish()
     }
@@ -431,6 +439,7 @@ impl Account {
                 creation_local_time: MilliSecondsSinceUnixEpoch::now(),
             },
             inner: Box::new(account),
+            client_data: None,
             shared: false,
             uploaded_signed_key_count: 0,
             fallback_creation_timestamp: None,
@@ -468,6 +477,17 @@ impl Account {
     /// Get the immutable data for this account.
     pub fn static_data(&self) -> &StaticAccountData {
         &self.static_data
+    }
+
+    /// Update the published information about the client application.
+    pub fn update_client_data(&mut self, client_data: Option<DeviceKeysClientData>) {
+        if self.client_data == client_data {
+            return;
+        }
+
+        self.client_data = client_data;
+        // Mark as unshared, so that we do the upload again.
+        self.shared = false;
     }
 
     /// Update the uploaded key count.
@@ -678,6 +698,7 @@ impl Account {
             device_id: self.device_id().to_owned(),
             pickle,
             shared: self.shared(),
+            client_data: self.client_data.to_owned(),
             dehydrated: self.static_data.dehydrated,
             uploaded_signed_key_count: self.uploaded_key_count(),
             creation_local_time: self.static_data.creation_local_time,
@@ -736,6 +757,7 @@ impl Account {
                 creation_local_time: pickle.creation_local_time,
             },
             inner: Box::new(account),
+            client_data: pickle.client_data,
             shared: pickle.shared,
             uploaded_signed_key_count: pickle.uploaded_signed_key_count,
             fallback_creation_timestamp: pickle.fallback_key_creation_timestamp,
@@ -760,6 +782,9 @@ impl Account {
             DeviceKeyId::from_parts(DeviceKeyAlgorithm::Ed25519, &self.static_data.device_id),
             signature,
         );
+
+        // Update the client application data to match what our app has told us.
+        device_keys.unsigned.client_data = self.client_data.clone();
 
         device_keys
     }

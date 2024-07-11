@@ -129,12 +129,34 @@ impl DeviceKeys {
     }
 }
 
+/// Information about the client that these keys belong to.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct DeviceKeysClientData {
+    /// The client application name. Typically just "Element".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
+
+    /// The platform. "Web Platform", "EI", "EXA", etc, to match the Posthog
+    /// `appPlatform` property, per
+    /// https://github.com/matrix-org/matrix-analytics-events/blob/v0.24.0/schemas/SuperProperties.json#L17-L29
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_platform: Option<String>,
+
+    /// The version number of the client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_version: Option<String>,
+}
+
 /// Additional data added to device key information by intermediate servers.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct UnsignedDeviceInfo {
     /// The display name which the user set on the device.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_display_name: Option<String>,
+
+    /// Information about the client that these keys belong to.
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "io.element.client_data")]
+    pub client_data: Option<DeviceKeysClientData>,
 
     #[serde(flatten)]
     other: BTreeMap<String, Value>,
@@ -148,7 +170,7 @@ impl UnsignedDeviceInfo {
 
     /// Checks whether all fields are empty / `None`.
     pub fn is_empty(&self) -> bool {
-        self.device_display_name.is_none()
+        self.device_display_name.is_none() && self.client_data.is_none()
     }
 }
 
