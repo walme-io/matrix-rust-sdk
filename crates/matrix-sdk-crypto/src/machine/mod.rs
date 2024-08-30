@@ -870,7 +870,7 @@ impl OlmMachine {
                 session.sender_data = sender_data;
 
                 if self.store().compare_group_session(&session).await? == SessionOrdering::Better {
-                    info!("Received a new megolm room key");
+                    info!(?session, "Received a new megolm room key");
 
                     Ok(Some(session))
                 } else {

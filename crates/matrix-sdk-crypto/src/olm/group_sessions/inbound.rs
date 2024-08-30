@@ -482,7 +482,10 @@ impl InboundGroupSession {
 #[cfg(not(tarpaulin_include))]
 impl fmt::Debug for InboundGroupSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("InboundGroupSession").field("session_id", &self.session_id()).finish()
+        f.debug_struct("InboundGroupSession")
+            .field("session_id", &self.session_id())
+            .field("sender_data", &self.sender_data)
+            .finish()
     }
 }
 
