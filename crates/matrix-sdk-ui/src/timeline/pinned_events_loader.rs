@@ -68,6 +68,7 @@ impl PinnedEventsLoader {
             .collect();
 
         if pinned_event_ids.is_empty() {
+            warn!("No pinned event ids to load, cancelling.");
             return Ok(Vec::new());
         }
 
@@ -77,6 +78,7 @@ impl PinnedEventsLoader {
             stream::iter(pinned_event_ids.into_iter().map(|event_id| {
                 let provider = self.room.clone();
                 async move {
+                    warn!("Loading pinned event with id: {}", event_id);
                     match provider.load_event_with_relations(&event_id, request_config).await {
                         Ok((event, related_events)) => {
                             let mut events = vec![event];
@@ -97,6 +99,8 @@ impl PinnedEventsLoader {
             .flat_map(stream::iter)
             .collect()
             .await;
+
+        warn!("Loaded {} pinned events", loaded_events.len());
 
         if loaded_events.is_empty() {
             return Err(PinnedEventsLoaderError::TimelineReloadFailed);

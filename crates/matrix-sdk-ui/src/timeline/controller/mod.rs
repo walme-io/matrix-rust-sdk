@@ -328,9 +328,12 @@ impl<P: RoomDataProvider> TimelineController<P> {
             }
 
             TimelineFocusData::PinnedEvents { loader } => {
+                warn!("Loading initial pinned timeline items");
                 let loaded_events = loader.load_events().await.map_err(Error::PinnedEventsError)?;
 
                 drop(focus_guard);
+
+                warn!("Loaded initial pinned timeline items");
 
                 let has_events = !loaded_events.is_empty();
 
@@ -637,8 +640,6 @@ impl<P: RoomDataProvider> TimelineController<P> {
     ) {
         let mut state = self.state.write().await;
 
-        state.clear();
-
         let track_read_markers = self.settings.track_read_receipts;
         if track_read_markers {
             state.populate_initial_user_receipt(&self.room_data_provider, ReceiptType::Read).await;
@@ -648,14 +649,13 @@ impl<P: RoomDataProvider> TimelineController<P> {
         }
 
         if !events.is_empty() {
-            state
-                .add_remote_events_at(
-                    events,
-                    TimelineEnd::Back,
-                    origin,
-                    &self.room_data_provider,
-                    &self.settings,
-                )
+            state.replace_all(
+                events,
+                TimelineEnd::Back,
+                origin,
+                &self.room_data_provider,
+                &self.settings,
+            )
                 .await;
         }
 

@@ -265,6 +265,21 @@ impl TimelineState {
         txn.commit();
     }
 
+    pub(super) async fn replace_all<P: RoomDataProvider>(
+        &mut self,
+        events: Vec<impl Into<SyncTimelineEvent>>,
+        position: TimelineEnd,
+        origin: RemoteEventOrigin,
+        room_data_provider: &P,
+        settings: &TimelineSettings,
+    ) -> HandleManyEventsResult {
+        let mut txn = self.transaction();
+        txn.clear();
+        let result = txn.add_remote_events_at(events, position, origin, room_data_provider, settings).await;
+        txn.commit();
+        result
+    }
+
     pub(super) fn transaction(&mut self) -> TimelineStateTransaction<'_> {
         let items = self.items.transaction();
         let meta = self.meta.clone();
