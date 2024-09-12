@@ -912,6 +912,14 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
     fn add_item(&mut self, content: TimelineItemContent) {
         self.result.item_added = true;
 
+        if let TimelineItemContent::OtherState(other_state) = &content {
+            if let AnyOtherFullStateEventContent::RoomEncryption(_) = other_state.content {
+                if let Ok(mut is_room_encrypted) = self.meta.is_room_encrypted.write() {
+                    is_room_encrypted.replace(true);
+                }
+            }
+        }
+
         let sender = self.ctx.sender.to_owned();
         let sender_profile = TimelineDetails::from_initial_value(self.ctx.sender_profile.clone());
         let timestamp = self.ctx.timestamp;
@@ -955,7 +963,11 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
             }
         };
 
-        let is_room_encrypted = self.meta.is_room_encrypted;
+        let is_room_encrypted = if let Ok(is_room_encrypted) = self.meta.is_room_encrypted.read() {
+            is_room_encrypted.unwrap_or_default()
+        } else {
+            false
+        };
 
         let mut item = EventTimelineItem::new(
             sender,

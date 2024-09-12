@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::{collections::VecDeque, future::Future, num::NonZeroUsize, sync::Arc};
-
+use std::sync::RwLock;
 use eyeball_im::{ObservableVector, ObservableVectorTransaction, ObservableVectorTransactionEntry};
 use itertools::Itertools as _;
 use matrix_sdk::{
@@ -83,7 +83,7 @@ impl TimelineState {
         room_version: RoomVersionId,
         internal_id_prefix: Option<String>,
         unable_to_decrypt_hook: Option<Arc<UtdHookManager>>,
-        is_room_encrypted: bool,
+        is_room_encrypted: Option<bool>,
     ) -> Self {
         Self {
             // Upstream default capacity is currently 16, which is making
@@ -757,7 +757,7 @@ pub(in crate::timeline) struct TimelineMetadata {
     /// TODO: this is misplaced, it should be part of the room provider as this
     /// value can change over time when a room switches from non-encrypted
     /// to encrypted, see also #3850.
-    pub(crate) is_room_encrypted: bool,
+    pub(crate) is_room_encrypted: Arc<RwLock<Option<bool>>>,
 
     /// Matrix room version of the timeline's room, or a sensible default.
     ///
@@ -814,7 +814,7 @@ impl TimelineMetadata {
         room_version: RoomVersionId,
         internal_id_prefix: Option<String>,
         unable_to_decrypt_hook: Option<Arc<UtdHookManager>>,
-        is_room_encrypted: bool,
+        is_room_encrypted: Option<bool>,
     ) -> Self {
         Self {
             own_user_id,
@@ -831,7 +831,7 @@ impl TimelineMetadata {
             room_version,
             unable_to_decrypt_hook,
             internal_id_prefix,
-            is_room_encrypted,
+            is_room_encrypted: Arc::new(RwLock::new(is_room_encrypted)),
         }
     }
 
