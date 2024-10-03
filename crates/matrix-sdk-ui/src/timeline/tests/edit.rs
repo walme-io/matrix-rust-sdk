@@ -14,18 +14,25 @@
 
 use std::collections::BTreeMap;
 
-use assert_matches2::assert_let;
+use assert_matches2::{assert_let, assert_matches};
 use eyeball_im::VectorDiff;
-use matrix_sdk::deserialized_responses::{
-    AlgorithmInfo, EncryptionInfo, VerificationLevel, VerificationState,
+use matrix_sdk::{
+    assert_next_matches_with_timeout,
+    deserialized_responses::{AlgorithmInfo, EncryptionInfo, VerificationLevel, VerificationState},
 };
 use matrix_sdk_test::{async_test, sync_timeline_event, ALICE};
 use ruma::{
     event_id,
-    events::room::message::{MessageType, RedactedRoomMessageEventContent},
+    events::room::{
+        encrypted::{
+            EncryptedEventScheme, MegolmV1AesSha2ContentInit, Replacement,
+            RoomEncryptedEventContent,
+        },
+        message::{MessageType, RedactedRoomMessageEventContent},
+    },
     server_name, EventId,
 };
-use stream_assert::assert_next_matches;
+use stream_assert::{assert_next_matches, assert_pending};
 
 use super::TestTimeline;
 use crate::timeline::TimelineItemContent;
@@ -221,4 +228,55 @@ async fn test_edit_updates_encryption_info() {
     assert_let!(TimelineItemContent::Message(message) = first_event.content());
     assert_let!(MessageType::Text(text) = message.msgtype());
     assert_eq!(text.body, "!!edited!! **better** message");
+}
+
+#[async_test]
+async fn test_utd_edit_replaces_original() {
+    let timeline = TestTimeline::with_is_room_encrypted(true);
+
+    let mut stream = timeline.subscribe_events().await;
+
+    let f = &timeline.factory;
+    let original_event_id = event_id!("$original_event");
+
+    timeline
+        .handle_live_event(f.text_msg("original").sender(*ALICE).event_id(original_event_id))
+        .await;
+
+    assert_next_matches_with_timeout!(stream, VectorDiff::PushBack { value } => {
+        assert_eq!(value.content().as_message().unwrap().body(), "original");
+    });
+
+    let encrypted = EncryptedEventScheme::MegolmV1AesSha2(
+        MegolmV1AesSha2ContentInit {
+            ciphertext: "\
+                AwgAEpABqOCAaP6NqXquQcEsrGCVInjRTLHmVH8exqYO0b5Aulhgzqrt6oWVUZCpSRBCnlmvnc96\
+                n/wpjlALt6vYUcNr2lMkXpuKuYaQhHx5c4in2OJCkPzGmbpXRRdw6WC25uzzKr5Vi5Fa8B5o1C5E\
+                DGgNsJg8jC+cVZbcbVCFisQcLATG8UBDuZUGn3WtVFzw0aHzgxGEc+t4C8J9aWwqwokaEF7fRjTK\
+                ma5GZJZKR9KfdmeHR2TsnlnLPiPh5F12hqwd5XaOMQemS2j4pENfxpBlYIy5Wk3FQN0G"
+                .to_owned(),
+            sender_key: "sKSGv2uD9zUncgL6GiLedvuky3fjVcEz9qVKZkpzN14".to_owned(),
+            device_id: "PNQBRWYIJL".into(),
+            session_id: "gI3QWFyqg55EDS8d0omSJwDw8ZWBNEGUw8JxoZlzJgU".into(),
+        }
+        .into(),
+    );
+
+    timeline
+        .handle_live_event(
+            f.event(RoomEncryptedEventContent::new(
+                encrypted,
+                Some(ruma::events::room::encrypted::Relation::Replacement(Replacement::new(
+                    original_event_id.to_owned(),
+                ))),
+            ))
+            .sender(&ALICE),
+        )
+        .await;
+
+    assert_next_matches_with_timeout!(stream, VectorDiff::Set { index: 0, value } => {
+        assert_matches!(value.content(), TimelineItemContent::UnableToDecrypt(..));
+    });
+
+    assert_pending!(stream);
 }

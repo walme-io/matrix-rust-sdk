@@ -34,6 +34,7 @@ use ruma::{
         receipt::Receipt,
         relation::Replacement,
         room::{
+            encrypted::{self, RoomEncryptedEventContent},
             member::RoomMemberEventContent,
             message::{self, RoomMessageEventContent, RoomMessageEventContentWithoutRelation},
         },
@@ -333,9 +334,7 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                 }
 
                 AnyMessageLikeEventContent::RoomEncrypted(c) => {
-                    // TODO: Handle replacements if the replaced event is also UTD
                     let cause = UtdCause::determine(raw_event);
-                    self.add_item(TimelineItemContent::unable_to_decrypt(c, cause));
 
                     // Let the hook know that we ran into an unable-to-decrypt that is added to the
                     // timeline.
@@ -343,6 +342,30 @@ impl<'a, 'o> TimelineEventHandler<'a, 'o> {
                         if let Flow::Remote { event_id, .. } = &self.ctx.flow {
                             hook.on_utd(event_id, cause).await;
                         }
+                    }
+
+                    if let Some(encrypted::Relation::Replacement(encrypted::Replacement {
+                        event_id,
+                        ..
+                    })) = &c.relates_to
+                    {
+                        if let Some((item_pos, item)) = rfind_event_by_id(self.items, &event_id) {
+                            trace!("Replaced original event with UTD edit");
+                            let new_content = TimelineItemContent::unable_to_decrypt(c, cause);
+                            let new_item = item.with_content(new_content, raw_event.cloned());
+                            self.items.set(
+                                item_pos,
+                                TimelineItem::new(new_item, item.internal_id.to_owned()),
+                            );
+                            self.result.items_updated += 1;
+                        } else {
+                            // It's fine to do this, because after decrypting, we may remove the
+                            // event if it wasn't rendered into a timeline item.
+                            warn!("Couldn't find original event for UTD edit, adding a UTD item instead");
+                            self.add_item(TimelineItemContent::unable_to_decrypt(c, cause));
+                        }
+                    } else {
+                        self.add_item(TimelineItemContent::unable_to_decrypt(c, cause));
                     }
                 }
 
