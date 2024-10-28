@@ -3100,6 +3100,7 @@ dependencies = [
  "once_cell",
  "paranoid-android",
  "ruma",
+ "ruma-identifiers-validation",
  "serde",
  "serde_json",
  "thiserror",
