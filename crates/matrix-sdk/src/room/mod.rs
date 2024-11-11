@@ -3175,6 +3175,38 @@ impl Room {
             },
         }
     }
+
+    /// Mark a list of requests to join the room as seen, given their state
+    /// event ids.
+    pub async fn mark_requests_to_join_as_seen(&self, event_ids: &[OwnedEventId]) -> Result<()> {
+        let mut current_seen_events = self.get_seen_requests_to_join().await?;
+
+        for event_id in event_ids {
+            if !current_seen_events.contains(event_id) {
+                current_seen_events.push(event_id.to_owned());
+            }
+        }
+
+        self.client
+            .store()
+            .set_kv_data(
+                StateStoreDataKey::SeenRequestsToJoin(self.room_id()),
+                StateStoreDataValue::SeenRequestsToJoin(current_seen_events),
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Get the list of seen requests to join event ids in this room.
+    pub async fn get_seen_requests_to_join(&self) -> Result<Vec<OwnedEventId>> {
+        Ok(self
+            .client
+            .store()
+            .get_kv_data(StateStoreDataKey::SeenRequestsToJoin(self.room_id()))
+            .await?
+            .and_then(|v| v.into_ignored_join_requests())
+            .unwrap_or_default())
+    }
 }
 
 #[cfg(all(feature = "e2e-encryption", not(target_arch = "wasm32")))]
@@ -3466,7 +3498,8 @@ mod tests {
     use matrix_sdk_test::{
         async_test, test_json, JoinedRoomBuilder, StateTestEvent, SyncResponseBuilder,
     };
-    use ruma::{device_id, int, user_id};
+    use ruma::{device_id, event_id, int, user_id};
+    use serde_json::json;
     use wiremock::{
         matchers::{header, method, path_regex},
         Mock, MockServer, ResponseTemplate,
@@ -3650,5 +3683,53 @@ mod tests {
 
         room.clear_composer_draft().await.unwrap();
         assert_eq!(room.load_composer_draft().await.unwrap(), None);
+    }
+
+    #[async_test]
+    async fn test_mark_requests_to_join_as_seen() {
+        use matrix_sdk_test::DEFAULT_TEST_ROOM_ID;
+
+        let client = logged_in_client(None).await;
+        let event_id = event_id!("$knock:example.com");
+
+        let join_room_builder =
+            JoinedRoomBuilder::default().add_state_event(StateTestEvent::Custom(json!({
+                "content": {
+                    "avatar_url": "mxc://localhost/SEsfnsuifSDFSSEF",
+                    "displayname": "example",
+                    "membership": "knock",
+                    "reason": "Looking for support"
+                },
+                "event_id": event_id,
+                "origin_server_ts": 1432735824,
+                "room_id": "!jEsUZKDJdhlrceRyVU:localhost",
+                "sender": "@example:localhost",
+                "state_key": "@invited:localhost",
+                "type": "m.room.member",
+            })));
+
+        let response =
+            SyncResponseBuilder::default().add_joined_room(join_room_builder).build_sync_response();
+        client.base_client().receive_sync_response(response).await.unwrap();
+        let room = client.get_room(&DEFAULT_TEST_ROOM_ID).expect("Room should exist");
+
+        // At first, the room has no ignored requests to join
+        assert!(room.get_seen_requests_to_join().await.unwrap().is_empty());
+
+        // The request to join is successfully ignored
+        room.mark_requests_to_join_as_seen(&[event_id.to_owned()])
+            .await
+            .expect("Request could not be ignored");
+
+        // Now we have a single ignored request to join in the room
+        assert_eq!(room.get_seen_requests_to_join().await.unwrap().len(), 1);
+
+        // And it can't be ignored again
+        room.mark_requests_to_join_as_seen(&[event_id.to_owned()])
+            .await
+            .expect("Request could not be ignored");
+
+        // Check it's not added again
+        assert_eq!(room.get_seen_requests_to_join().await.unwrap().len(), 1);
     }
 }
