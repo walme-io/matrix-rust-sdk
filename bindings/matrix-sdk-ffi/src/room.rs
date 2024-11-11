@@ -25,8 +25,8 @@ use ruma::{
         },
         TimelineEventType,
     },
-    EventId, Int, OwnedDeviceId, OwnedTransactionId, OwnedUserId, RoomAliasId, TransactionId,
-    UserId,
+    EventId, Int, OwnedDeviceId, OwnedEventId, OwnedTransactionId, OwnedUserId, RoomAliasId,
+    TransactionId, UserId,
 };
 use tokio::sync::RwLock;
 use tracing::error;
@@ -862,6 +862,23 @@ impl Room {
         let transaction_id: &TransactionId = transaction_id.as_str().into();
         self.inner.send_queue().unwedge(transaction_id).await?;
         Ok(())
+    }
+
+    /// Mark a list of requests to join the room as seen, given their state
+    /// event ids.
+    pub async fn mark_requests_to_join_as_seen(
+        &self,
+        event_ids: Vec<String>,
+    ) -> Result<(), ClientError> {
+        let event_ids =
+            event_ids.iter().map(EventId::parse).collect::<Result<Vec<OwnedEventId>, _>>()?;
+        self.inner.mark_requests_to_join_as_seen(&event_ids).await.map_err(Into::into)
+    }
+
+    /// Get the list of seen requests to join event ids in this room.
+    pub async fn get_seen_requests_to_join(&self) -> Result<Vec<String>, ClientError> {
+        let seen_event_ids = self.inner.get_seen_requests_to_join().await?;
+        Ok(seen_event_ids.iter().map(|id| id.to_string()).collect())
     }
 }
 
