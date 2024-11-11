@@ -293,6 +293,10 @@ impl BaseClient {
             {
                 let prev_read_receipts = room_info.read_receipts.clone();
 
+                let room = self.get_room(room_id);
+                let power_levels =
+                    if let Some(room) = room { room.power_levels().await.ok() } else { None };
+
                 compute_unread_counts(
                     user_id,
                     room_id,
@@ -300,6 +304,7 @@ impl BaseClient {
                     previous_events_provider.for_room(room_id),
                     &joined_room_update.timeline.events,
                     &mut room_info.read_receipts,
+                    power_levels,
                 );
 
                 if prev_read_receipts != room_info.read_receipts {

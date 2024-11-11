@@ -128,9 +128,9 @@ use ruma::{
     events::{
         poll::{start::PollStartEventContent, unstable_start::UnstablePollStartEventContent},
         receipt::{ReceiptEventContent, ReceiptThread, ReceiptType},
-        room::message::Relation,
-        AnySyncMessageLikeEvent, AnySyncTimelineEvent, OriginalSyncMessageLikeEvent,
-        SyncMessageLikeEvent,
+        room::{member::MembershipState, message::Relation, power_levels::RoomPowerLevels},
+        AnySyncMessageLikeEvent, AnySyncStateEvent, AnySyncTimelineEvent,
+        OriginalSyncMessageLikeEvent, SyncMessageLikeEvent,
     },
     serde::Raw,
     EventId, OwnedEventId, OwnedUserId, RoomId, UserId,
@@ -202,8 +202,13 @@ impl RoomReadReceipts {
     ///
     /// Returns whether a new event triggered a new unread/notification/mention.
     #[inline(always)]
-    fn process_event(&mut self, event: &SyncTimelineEvent, user_id: &UserId) {
-        if marks_as_unread(event.raw(), user_id) {
+    fn process_event(
+        &mut self,
+        event: &SyncTimelineEvent,
+        user_id: &UserId,
+        power_levels: Option<&RoomPowerLevels>,
+    ) {
+        if marks_as_unread(event.raw(), user_id, power_levels) {
             self.num_unread += 1;
         }
 
@@ -237,6 +242,7 @@ impl RoomReadReceipts {
         receipt_event_id: &EventId,
         user_id: &UserId,
         events: impl IntoIterator<Item = &'a SyncTimelineEvent>,
+        power_levels: Option<RoomPowerLevels>,
     ) -> bool {
         let mut counting_receipts = false;
 
@@ -257,7 +263,7 @@ impl RoomReadReceipts {
             }
 
             if counting_receipts {
-                self.process_event(event, user_id);
+                self.process_event(event, user_id, power_levels.as_ref());
             }
         }
 
@@ -457,6 +463,7 @@ pub(crate) fn compute_unread_counts(
     previous_events: Vector<SyncTimelineEvent>,
     new_events: &[SyncTimelineEvent],
     read_receipts: &mut RoomReadReceipts,
+    power_levels: Option<RoomPowerLevels>,
 ) {
     debug!(?read_receipts, "Starting.");
 
@@ -503,7 +510,7 @@ pub(crate) fn compute_unread_counts(
 
         // The event for the receipt is in `all_events`, so we'll find it and can count
         // safely from here.
-        read_receipts.find_and_process_events(&event_id, user_id, all_events.iter());
+        read_receipts.find_and_process_events(&event_id, user_id, all_events.iter(), power_levels);
 
         debug!(?read_receipts, "after finding a better receipt");
         return;
@@ -517,14 +524,18 @@ pub(crate) fn compute_unread_counts(
     // for the next receipt.
 
     for event in new_events {
-        read_receipts.process_event(event, user_id);
+        read_receipts.process_event(event, user_id, power_levels.as_ref());
     }
 
     debug!(?read_receipts, "no better receipt, {} new events", new_events.len());
 }
 
 /// Is the event worth marking a room as unread?
-fn marks_as_unread(event: &Raw<AnySyncTimelineEvent>, user_id: &UserId) -> bool {
+fn marks_as_unread(
+    event: &Raw<AnySyncTimelineEvent>,
+    user_id: &UserId,
+    power_levels: Option<&RoomPowerLevels>,
+) -> bool {
     let event = match event.deserialize() {
         Ok(event) => event,
         Err(err) => {
@@ -611,21 +622,36 @@ fn marks_as_unread(event: &Raw<AnySyncTimelineEvent>, user_id: &UserId) -> bool 
             }
         }
 
-        AnySyncTimelineEvent::State(_) => false,
+        AnySyncTimelineEvent::State(state) => match state {
+            AnySyncStateEvent::RoomMember(member) => {
+                let Some(power_levels) = power_levels else { return false };
+                // Only add an unread notification for knock state events
+                if matches!(member.membership(), MembershipState::Knock) {
+                    power_levels.user_can_invite(user_id) || power_levels.user_can_kick(user_id)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        },
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{num::NonZeroUsize, ops::Not as _};
+    use std::{collections::BTreeMap, num::NonZeroUsize, ops::Not as _};
 
+    use assign::assign;
     use eyeball_im::Vector;
     use matrix_sdk_common::{deserialized_responses::SyncTimelineEvent, ring_buffer::RingBuffer};
     use matrix_sdk_test::{sync_timeline_event, EventBuilder};
     use ruma::{
         event_id,
-        events::receipt::{ReceiptThread, ReceiptType},
-        owned_event_id, owned_user_id,
+        events::{
+            receipt::{ReceiptThread, ReceiptType},
+            room::power_levels::{RoomPowerLevels, RoomPowerLevelsEventContent},
+        },
+        int, owned_event_id, owned_user_id,
         push::Action,
         room_id, user_id, EventId, UserId,
     };
@@ -646,7 +672,7 @@ mod tests {
             "origin_server_ts": 12344446,
             "content": { "body":"A", "msgtype": "m.text" },
         });
-        assert!(marks_as_unread(&ev, user_id));
+        assert!(marks_as_unread(&ev, user_id, None));
 
         // ... but a message from ourselves doesn't.
         let ev = sync_timeline_event!({
@@ -656,7 +682,7 @@ mod tests {
             "origin_server_ts": 12344446,
             "content": { "body":"A", "msgtype": "m.text" },
         });
-        assert!(marks_as_unread(&ev, user_id).not());
+        assert!(marks_as_unread(&ev, user_id, None).not());
     }
 
     #[test]
@@ -683,7 +709,7 @@ mod tests {
                 "msgtype": "m.text"
             },
         });
-        assert!(marks_as_unread(&ev, user_id).not());
+        assert!(marks_as_unread(&ev, user_id, None).not());
     }
 
     #[test]
@@ -706,7 +732,7 @@ mod tests {
             }
         });
 
-        assert!(marks_as_unread(&ev, user_id).not());
+        assert!(marks_as_unread(&ev, user_id, None).not());
     }
 
     #[test]
@@ -732,11 +758,11 @@ mod tests {
             }
         });
 
-        assert!(marks_as_unread(&ev, user_id).not());
+        assert!(marks_as_unread(&ev, user_id, None).not());
     }
 
     #[test]
-    fn test_state_event_doesnt_mark_as_unread() {
+    fn test_generic_state_event_doesnt_mark_as_unread() {
         let user_id = user_id!("@alice:example.org");
         let event_id = event_id!("$1");
         let ev = sync_timeline_event!({
@@ -751,10 +777,78 @@ mod tests {
             "type": "m.room.member",
         });
 
-        assert!(marks_as_unread(&ev, user_id).not());
+        assert!(marks_as_unread(&ev, user_id, None).not());
 
         let other_user_id = user_id!("@bob:example.org");
-        assert!(marks_as_unread(&ev, other_user_id).not());
+        assert!(marks_as_unread(&ev, other_user_id, None).not());
+    }
+
+    #[test]
+    fn test_knock_state_event_when_user_can_act_on_it_marks_as_unread() {
+        let user_id = user_id!("@alice:example.org");
+        let event_id = event_id!("$1");
+        let ev = sync_timeline_event!({
+            "content": {
+                "displayname": "Alice",
+                "membership": "knock",
+            },
+            "event_id": event_id,
+            "origin_server_ts": 1432135524678u64,
+            "sender": user_id,
+            "state_key": user_id,
+            "type": "m.room.member",
+        });
+
+        // A user in the room already
+        let joined_user_id = user_id!("@bob:example.org");
+
+        // The joined user has enough power level to invite or kick so it can act on the
+        // request to join
+        let sender_power_level = BTreeMap::from([(joined_user_id.to_owned(), int!(50))]);
+        let power_levels: RoomPowerLevels = assign!(RoomPowerLevelsEventContent::new(), {
+            invite: int!(50), kick: int!(50), users: sender_power_level
+        })
+        .into();
+
+        // Not marked as unread for the sender
+        assert!(marks_as_unread(&ev, user_id, Some(&power_levels)).not());
+
+        // Marked as unread for everyone else
+        assert!(marks_as_unread(&ev, joined_user_id, Some(&power_levels)));
+    }
+
+    #[test]
+    fn test_knock_state_event_when_user_can_not_act_on_it_doesnt_mark_as_unread() {
+        let user_id = user_id!("@alice:example.org");
+        let event_id = event_id!("$1");
+        let ev = sync_timeline_event!({
+            "content": {
+                "displayname": "Alice",
+                "membership": "knock",
+            },
+            "event_id": event_id,
+            "origin_server_ts": 1432135524678u64,
+            "sender": user_id,
+            "state_key": user_id,
+            "type": "m.room.member",
+        });
+
+        // A user in the room already
+        let joined_user_id = user_id!("@bob:example.org");
+
+        // The joined user has no powers in this room, they can't interact with the
+        // request to join
+        let sender_power_level = BTreeMap::from([(joined_user_id.to_owned(), int!(0))]);
+        let power_levels: RoomPowerLevels = assign!(RoomPowerLevelsEventContent::new(), {
+            invite: int!(50), kick: int!(50), users: sender_power_level
+        })
+        .into();
+
+        // Not marked as unread because the user can't act on it
+        assert!(marks_as_unread(&ev, joined_user_id, Some(&power_levels)).not());
+        // Same would happen if there aren't any users with special power levels in the
+        // room
+        assert!(marks_as_unread(&ev, joined_user_id, None).not());
     }
 
     #[test]
@@ -777,7 +871,7 @@ mod tests {
         // An interesting event from oneself doesn't count as a new unread message.
         let event = make_event(user_id, Vec::new());
         let mut receipts = RoomReadReceipts::default();
-        receipts.process_event(&event, user_id);
+        receipts.process_event(&event, user_id, None);
         assert_eq!(receipts.num_unread, 0);
         assert_eq!(receipts.num_mentions, 0);
         assert_eq!(receipts.num_notifications, 0);
@@ -785,7 +879,7 @@ mod tests {
         // An interesting event from someone else does count as a new unread message.
         let event = make_event(user_id!("@bob:example.org"), Vec::new());
         let mut receipts = RoomReadReceipts::default();
-        receipts.process_event(&event, user_id);
+        receipts.process_event(&event, user_id, None);
         assert_eq!(receipts.num_unread, 1);
         assert_eq!(receipts.num_mentions, 0);
         assert_eq!(receipts.num_notifications, 0);
@@ -793,7 +887,7 @@ mod tests {
         // Push actions computed beforehand are respected.
         let event = make_event(user_id!("@bob:example.org"), vec![Action::Notify]);
         let mut receipts = RoomReadReceipts::default();
-        receipts.process_event(&event, user_id);
+        receipts.process_event(&event, user_id, None);
         assert_eq!(receipts.num_unread, 1);
         assert_eq!(receipts.num_mentions, 0);
         assert_eq!(receipts.num_notifications, 1);
@@ -803,7 +897,7 @@ mod tests {
             vec![Action::SetTweak(ruma::push::Tweak::Highlight(true))],
         );
         let mut receipts = RoomReadReceipts::default();
-        receipts.process_event(&event, user_id);
+        receipts.process_event(&event, user_id, None);
         assert_eq!(receipts.num_unread, 1);
         assert_eq!(receipts.num_mentions, 1);
         assert_eq!(receipts.num_notifications, 0);
@@ -813,7 +907,7 @@ mod tests {
             vec![Action::SetTweak(ruma::push::Tweak::Highlight(true)), Action::Notify],
         );
         let mut receipts = RoomReadReceipts::default();
-        receipts.process_event(&event, user_id);
+        receipts.process_event(&event, user_id, None);
         assert_eq!(receipts.num_unread, 1);
         assert_eq!(receipts.num_mentions, 1);
         assert_eq!(receipts.num_notifications, 1);
@@ -822,7 +916,7 @@ mod tests {
         // make sure to resist against it.
         let event = make_event(user_id!("@bob:example.org"), vec![Action::Notify, Action::Notify]);
         let mut receipts = RoomReadReceipts::default();
-        receipts.process_event(&event, user_id);
+        receipts.process_event(&event, user_id, None);
         assert_eq!(receipts.num_unread, 1);
         assert_eq!(receipts.num_mentions, 0);
         assert_eq!(receipts.num_notifications, 1);
@@ -836,7 +930,7 @@ mod tests {
         // When provided with no events, we report not finding the event to which the
         // receipt relates.
         let mut receipts = RoomReadReceipts::default();
-        assert!(receipts.find_and_process_events(ev0, user_id, &[]).not());
+        assert!(receipts.find_and_process_events(ev0, user_id, &[], None).not());
         assert_eq!(receipts.num_unread, 0);
         assert_eq!(receipts.num_notifications, 0);
         assert_eq!(receipts.num_mentions, 0);
@@ -860,7 +954,7 @@ mod tests {
             ..Default::default()
         };
         assert!(receipts
-            .find_and_process_events(ev0, user_id, &[make_event(event_id!("$1"))],)
+            .find_and_process_events(ev0, user_id, &[make_event(event_id!("$1"))], None)
             .not());
         assert_eq!(receipts.num_unread, 42);
         assert_eq!(receipts.num_notifications, 13);
@@ -875,7 +969,7 @@ mod tests {
             num_mentions: 37,
             ..Default::default()
         };
-        assert!(receipts.find_and_process_events(ev0, user_id, &[make_event(ev0)]));
+        assert!(receipts.find_and_process_events(ev0, user_id, &[make_event(ev0)], None));
         assert_eq!(receipts.num_unread, 0);
         assert_eq!(receipts.num_notifications, 0);
         assert_eq!(receipts.num_mentions, 0);
@@ -897,6 +991,7 @@ mod tests {
                     make_event(event_id!("$2")),
                     make_event(event_id!("$3"))
                 ],
+                None,
             )
             .not());
         assert_eq!(receipts.num_unread, 42);
@@ -920,6 +1015,7 @@ mod tests {
                 make_event(event_id!("$2")),
                 make_event(event_id!("$3"))
             ],
+            None,
         ));
         assert_eq!(receipts.num_unread, 2);
         assert_eq!(receipts.num_notifications, 0);
@@ -942,6 +1038,7 @@ mod tests {
                 make_event(event_id!("$2")),
                 make_event(event_id!("$3"))
             ],
+            None,
         ));
         assert_eq!(receipts.num_unread, 2);
         assert_eq!(receipts.num_notifications, 0);
@@ -990,6 +1087,7 @@ mod tests {
             previous_events.clone(),
             &[ev1.clone(), ev2.clone()],
             &mut read_receipts,
+            None,
         );
 
         // It did find the receipt event (ev1).
@@ -1007,6 +1105,7 @@ mod tests {
             previous_events,
             &[new_event],
             &mut read_receipts,
+            None,
         );
 
         // Only the new event should be added.
@@ -1070,6 +1169,7 @@ mod tests {
                             all_events.clone(),
                             &[],
                             &mut read_receipts,
+                            None,
                         );
 
                         assert!(
@@ -1091,6 +1191,7 @@ mod tests {
                             head_events.clone(),
                             &tail_events,
                             &mut read_receipts,
+                            None,
                         );
 
                         assert!(
@@ -1137,6 +1238,7 @@ mod tests {
             events,
             &[], // no new events
             &mut read_receipts,
+            None,
         );
 
         // Then there are no unread events,
@@ -1176,6 +1278,7 @@ mod tests {
             events,
             &[ev0], // duplicate event!
             &mut read_receipts,
+            None,
         );
 
         // All events are unread, and there's no pending receipt.
@@ -1608,6 +1711,7 @@ mod tests {
             Vector::new(),
             &events,
             &mut read_receipts,
+            None,
         );
 
         // Only the last two events sent by Bob count as unread.
