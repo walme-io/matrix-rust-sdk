@@ -379,6 +379,9 @@ impl SqliteStateStore {
             StateStoreDataKey::ComposerDraft(room_id) => {
                 Cow::Owned(format!("{}:{room_id}", StateStoreDataKey::COMPOSER_DRAFT))
             }
+            StateStoreDataKey::SeenRequestsToJoin(room_id) => {
+                Cow::Owned(format!("{}:{room_id}", StateStoreDataKey::SEEN_REQUESTS_TO_JOIN))
+            }
         };
 
         self.encode_key(keys::KV_BLOB, &*key_s)
@@ -977,6 +980,9 @@ impl StateStore for SqliteStateStore {
                     StateStoreDataKey::ComposerDraft(_) => {
                         StateStoreDataValue::ComposerDraft(self.deserialize_value(&data)?)
                     }
+                    StateStoreDataKey::SeenRequestsToJoin(_) => {
+                        StateStoreDataValue::SeenRequestsToJoin(self.deserialize_value(&data)?)
+                    }
                 })
             })
             .transpose()
@@ -1010,6 +1016,11 @@ impl StateStore for SqliteStateStore {
             )?,
             StateStoreDataKey::ComposerDraft(_) => self.serialize_value(
                 &value.into_composer_draft().expect("Session data not a composer draft"),
+            )?,
+            StateStoreDataKey::SeenRequestsToJoin(_) => self.serialize_value(
+                &value
+                    .into_ignored_join_requests()
+                    .expect("Session data not a set of ignored requests to join"),
             )?,
         };
 

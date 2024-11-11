@@ -90,6 +90,7 @@ pub struct MemoryStore {
     custom: StdRwLock<HashMap<Vec<u8>, Vec<u8>>>,
     send_queue_events: StdRwLock<BTreeMap<OwnedRoomId, Vec<QueuedRequest>>>,
     dependent_send_queue_events: StdRwLock<BTreeMap<OwnedRoomId, Vec<DependentQueuedRequest>>>,
+    ignored_requests_to_join: StdRwLock<BTreeMap<OwnedRoomId, Vec<OwnedEventId>>>,
 }
 
 impl MemoryStore {
@@ -185,6 +186,13 @@ impl StateStore for MemoryStore {
                 .get(room_id)
                 .cloned()
                 .map(StateStoreDataValue::ComposerDraft),
+            StateStoreDataKey::SeenRequestsToJoin(room_id) => self
+                .ignored_requests_to_join
+                .read()
+                .unwrap()
+                .get(room_id)
+                .cloned()
+                .map(StateStoreDataValue::SeenRequestsToJoin),
         })
     }
 
@@ -238,6 +246,14 @@ impl StateStore for MemoryStore {
                         .expect("Session data not containing server capabilities"),
                 );
             }
+            StateStoreDataKey::SeenRequestsToJoin(room_id) => {
+                self.ignored_requests_to_join.write().unwrap().insert(
+                    room_id.to_owned(),
+                    value
+                        .into_ignored_join_requests()
+                        .expect("Session data not a set of ignored join requests"),
+                );
+            }
         }
 
         Ok(())
@@ -263,6 +279,9 @@ impl StateStore for MemoryStore {
             }
             StateStoreDataKey::ComposerDraft(room_id) => {
                 self.composer_drafts.write().unwrap().remove(room_id);
+            }
+            StateStoreDataKey::SeenRequestsToJoin(room_id) => {
+                self.ignored_requests_to_join.write().unwrap().remove(room_id);
             }
         }
         Ok(())
