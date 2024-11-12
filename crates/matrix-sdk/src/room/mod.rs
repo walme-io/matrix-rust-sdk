@@ -140,6 +140,7 @@ use crate::{
     BaseRoom, Client, Error, HttpResult, Result, RoomState, TransmissionProgress,
 };
 
+pub mod ask_to_join_request;
 pub mod edit;
 pub mod futures;
 pub mod identity_status_changes;
@@ -357,6 +358,10 @@ impl Room {
         H: EventHandler<Ev, Ctx>,
     {
         self.client.add_room_event_handler(self.room_id(), handler)
+    }
+
+    pub fn remove_event_handler(&self, handle: EventHandlerHandle) {
+        self.client.remove_event_handler(handle)
     }
 
     /// Subscribe to all updates for this room.

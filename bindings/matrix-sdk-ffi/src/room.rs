@@ -1,7 +1,8 @@
 use std::{collections::HashMap, pin::pin, sync::Arc};
-
+use std::fmt::Debug;
+use std::ops::Deref;
 use anyhow::{Context, Result};
-use futures_util::StreamExt;
+use futures_util::{pin_mut, StreamExt};
 use matrix_sdk::{
     crypto::LocalTrust,
     event_cache::paginator::PaginatorError,
@@ -30,7 +31,9 @@ use ruma::{
 };
 use tokio::sync::RwLock;
 use tracing::error;
-
+use tracing::log::warn;
+use matrix_sdk::event_handler::EventHandlerHandle;
+use matrix_sdk::room::ask_to_join_request::AskToJoinRequestsSubscriber;
 use super::RUNTIME;
 use crate::{
     chunk_iterator::ChunkIterator,
@@ -44,6 +47,8 @@ use crate::{
     utils::u64_to_uint,
     TaskHandle,
 };
+use crate::error::NotYetImplemented;
+use crate::room_list::RoomListServiceSyncIndicator;
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum Membership {
@@ -858,6 +863,63 @@ impl Room {
         let seen_event_ids = self.inner.get_seen_requests_to_join().await?;
         Ok(seen_event_ids.iter().map(|id| id.to_string()).collect())
     }
+
+    pub fn get_ask_to_join_requests_subscriber(&self) -> Arc<AskToJoinRequestSubscriber> {
+        let room = Arc::new(self.inner.clone());
+        Arc::new(AskToJoinRequestSubscriber::new(room))
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct AskToJoinRequestSubscriber {
+    inner: matrix_sdk::room::ask_to_join_request::AskToJoinRequestsSubscriber,
+    event_handler: Arc<RwLock<Option<EventHandlerHandle>>>,
+}
+
+impl AskToJoinRequestSubscriber {
+    fn new(room: Arc<SdkRoom>) -> Self {
+        Self {
+            inner: matrix_sdk::room::ask_to_join_request::AskToJoinRequestsSubscriber::new(room), event_handler: Arc::new(RwLock::new(None))
+        }
+    }
+}
+
+#[matrix_sdk_ffi_macros::export]
+impl AskToJoinRequestSubscriber {
+    pub async fn subscribe(&self, listener: Box<dyn RequestsToJoinListener>) -> Result<Arc<TaskHandle>, ClientError> {
+        let (stream, event_handler) = self.inner.subscribe().await?;
+
+        let mut stored_event_handler = self.event_handler.write().await;
+        *stored_event_handler = Some(event_handler);
+
+        Ok(Arc::new(TaskHandle::new(RUNTIME.spawn(async move {
+            pin_mut!(stream);
+
+            while let Some(requests) = stream.next().await {
+                let mut updated_requests = Vec::with_capacity(requests.len());
+                for request in requests {
+                    if let Ok(request) = request.try_into() {
+                        updated_requests.push(Arc::new(request));
+                    } else {
+                        warn!("Could not transform SDK AskToJoinRequest into FFI one, skippping");
+                        continue;
+                    }
+                }
+                listener.on_update(updated_requests);
+            }
+        }))))
+    }
+
+    pub async fn unsubscribe(&self) {
+        if let Some(handle) = self.event_handler.read().await.deref() {
+            self.inner.unsubscribe(handle.clone())
+        };
+    }
+}
+
+#[matrix_sdk_ffi_macros::export(callback_interface)]
+pub trait RequestsToJoinListener: Send + Sync + Debug {
+    fn on_update(&self, requests_to_join: Vec<Arc<AskToJoinRequest>>);
 }
 
 /// Generates a `matrix.to` permalink to the given room alias.
@@ -1089,5 +1151,42 @@ impl TryFrom<ComposerDraftType> for SdkComposerDraftType {
         };
 
         Ok(draft_type)
+    }
+}
+
+#[derive(uniffi::Object)]
+struct AskToJoinRequest {
+    inner: matrix_sdk::room::ask_to_join_request::AskToJoinRequest,
+    member: RoomMember,
+}
+
+#[matrix_sdk_ffi_macros::export]
+impl AskToJoinRequest {
+    pub fn member(&self) -> RoomMember {
+        self.member.clone()
+    }
+
+    pub fn is_unread(&self) -> bool {
+        self.inner.is_unread
+    }
+
+    pub async fn accept(&self) -> Result<(), ClientError> {
+        self.inner.accept().await.map_err(Into::into)
+    }
+
+    pub async fn decline(&self, reason: Option<String>) -> Result<(), ClientError> {
+        self.inner.decline(reason.as_deref()).await.map_err(Into::into)
+    }
+
+    pub async fn decline_and_ban(&self, reason: Option<String>) -> Result<(), ClientError> {
+        self.inner.decline_and_ban(reason.as_deref()).await.map_err(Into::into)
+    }
+}
+
+impl TryFrom<matrix_sdk::room::ask_to_join_request::AskToJoinRequest> for AskToJoinRequest {
+    type Error = NotYetImplemented;
+    fn try_from(value: matrix_sdk::room::ask_to_join_request::AskToJoinRequest) -> Result<Self, Self::Error> {
+        let member: RoomMember = value.member.clone().try_into()?;
+        Ok(Self { inner: value, member })
     }
 }

@@ -476,6 +476,11 @@ impl MemberEvent {
                 .unwrap_or_else(|| self.user_id().localpart()),
         )
     }
+
+    /// The reason why the membership state changed, if any.
+    pub fn reason(&self) -> Option<&str> {
+        self.original_content().and_then(|c| c.reason.as_deref())
+    }
 }
 
 impl SyncOrStrippedState<RoomPowerLevelsEventContent> {

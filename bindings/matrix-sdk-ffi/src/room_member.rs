@@ -76,12 +76,13 @@ pub fn matrix_to_user_permalink(user_id: String) -> Result<String, ClientError> 
     Ok(user_id.matrix_to_uri().to_string())
 }
 
-#[derive(uniffi::Record)]
+#[derive(Clone, uniffi::Record)]
 pub struct RoomMember {
     pub user_id: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub membership: MembershipState,
+    pub membership_change_reason: Option<String>,
     pub is_name_ambiguous: bool,
     pub power_level: i64,
     pub normalized_power_level: i64,
@@ -99,6 +100,7 @@ impl TryFrom<SdkRoomMember> for RoomMember {
             display_name: m.display_name().map(|s| s.to_owned()),
             avatar_url: m.avatar_url().map(|a| a.to_string()),
             membership: m.membership().clone().try_into()?,
+            membership_change_reason: m.reason().map(|s| s.to_owned()),
             is_name_ambiguous: m.name_ambiguous(),
             power_level: m.power_level(),
             normalized_power_level: m.normalized_power_level(),

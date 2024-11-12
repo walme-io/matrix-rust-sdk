@@ -126,6 +126,11 @@ impl RoomMember {
         }
     }
 
+    /// The reason why the membership state changed, if any.
+    pub fn reason(&self) -> Option<&str> {
+        self.event.reason()
+    }
+
     /// Get the normalized power level of this member.
     ///
     /// The normalized power level depends on the maximum power level that can
