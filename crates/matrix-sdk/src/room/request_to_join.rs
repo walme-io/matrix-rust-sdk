@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ruma::{
-    events::room::member::OriginalSyncRoomMemberEvent, EventId, OwnedEventId, OwnedMxcUri,
+    EventId, OwnedEventId, OwnedMxcUri,
     OwnedUserId, RoomId,
 };
 
@@ -36,9 +36,9 @@ impl RequestToJoinRoom {
 
     /// Marks the request to join as 'seen' so the client can ignore it in the
     /// future.
-    pub async fn mark_as_seen(&mut self) -> Result<bool, Error> {
+    pub async fn mark_as_seen(&mut self) -> Result<(), Error> {
         self.room.mark_requests_to_join_as_seen(&[self.event_id.to_owned()]).await?;
-        Ok(true)
+        Ok(())
     }
 
     /// Accepts the request to join by inviting the user to the room.
@@ -79,17 +79,6 @@ impl From<RoomMember> for RequestToJoinMemberInfo {
             display_name: member.display_name().map(ToOwned::to_owned),
             avatar_url: member.avatar_url().map(ToOwned::to_owned),
             reason: member.event().reason().map(ToOwned::to_owned),
-        }
-    }
-}
-
-impl From<OriginalSyncRoomMemberEvent> for RequestToJoinMemberInfo {
-    fn from(member: OriginalSyncRoomMemberEvent) -> Self {
-        Self {
-            user_id: member.state_key,
-            display_name: member.content.displayname,
-            avatar_url: member.content.avatar_url,
-            reason: member.content.reason,
         }
     }
 }
