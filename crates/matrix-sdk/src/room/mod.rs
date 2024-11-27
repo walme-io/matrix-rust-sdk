@@ -16,7 +16,7 @@
 
 use std::{
     borrow::Borrow,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     ops::Deref,
     sync::Arc,
     time::Duration,
@@ -3169,6 +3169,48 @@ impl Room {
                 _ => Err(http_error.into()),
             },
         }
+    }
+
+    /// Mark a list of requests to join the room as seen, given their state
+    /// event ids.
+    pub async fn mark_requests_to_join_as_seen(&self, event_ids: &[OwnedEventId]) -> Result<()> {
+        let mut current_seen_events = self.get_seen_requests_to_join_ids().await?;
+
+        for event_id in event_ids {
+            current_seen_events.insert(event_id.to_owned());
+        }
+
+        self.seen_requests_to_join_ids.set(Some(current_seen_events.clone()));
+
+        self.client
+            .store()
+            .set_kv_data(
+                StateStoreDataKey::SeenRequestsToJoin(self.room_id()),
+                StateStoreDataValue::SeenRequestsToJoin(current_seen_events),
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Get the list of seen requests to join event ids in this room.
+    pub async fn get_seen_requests_to_join_ids(&self) -> Result<HashSet<OwnedEventId>> {
+        let current_requests_to_join_ids = self.seen_requests_to_join_ids.get();
+        let current_requests_to_join_ids: HashSet<OwnedEventId> =
+            if let Some(requests) = current_requests_to_join_ids.as_ref() {
+                requests.clone()
+            } else {
+                let requests = self
+                    .client
+                    .store()
+                    .get_kv_data(StateStoreDataKey::SeenRequestsToJoin(self.room_id()))
+                    .await?
+                    .and_then(|v| v.into_seen_join_requests())
+                    .unwrap_or_default();
+
+                self.seen_requests_to_join_ids.set(Some(requests.clone()));
+                requests
+            };
+        Ok(current_requests_to_join_ids)
     }
 }
 
