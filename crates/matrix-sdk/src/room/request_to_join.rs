@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use ruma::{
-    EventId, OwnedEventId, OwnedMxcUri,
-    OwnedUserId, RoomId,
-};
+use js_int::UInt;
+use ruma::{EventId, OwnedEventId, OwnedMxcUri, OwnedUserId, RoomId};
 
 use crate::{room::RoomMember, Error, Room};
 
@@ -13,6 +11,8 @@ pub struct RequestToJoinRoom {
     room: Arc<Room>,
     /// The event id of the event containing knock membership change.
     pub event_id: OwnedEventId,
+    /// The timestamp when this request was created.
+    pub timestamp: Option<UInt>,
     /// Some general room member info to display.
     pub member_info: RequestToJoinMemberInfo,
     /// Whether it's been marked as 'seen' by the client.
@@ -23,10 +23,11 @@ impl RequestToJoinRoom {
     pub(crate) fn new(
         room: Arc<Room>,
         event_id: &EventId,
+        timestamp: Option<UInt>,
         member: RequestToJoinMemberInfo,
         is_seen: bool,
     ) -> Self {
-        Self { room, event_id: event_id.to_owned(), member_info: member, is_seen }
+        Self { room, event_id: event_id.to_owned(), timestamp, member_info: member, is_seen }
     }
 
     /// The room id for the `Room` form whose access is requested.

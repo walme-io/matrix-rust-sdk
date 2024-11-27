@@ -3280,6 +3280,7 @@ impl Room {
                     Some(RequestToJoinRoom::new(
                         self.clone(),
                         &event_id,
+                        member.event().timestamp(),
                         member.into(),
                         seen_request_ids.contains(&event_id),
                     ))

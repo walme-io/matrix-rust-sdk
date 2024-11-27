@@ -873,6 +873,7 @@ impl From<matrix_sdk::room::request_to_join::RequestToJoinRoom> for RequestToJoi
             display_name: request.member_info.display_name.clone(),
             avatar_url: request.member_info.avatar_url.as_ref().map(|url| url.to_string()),
             reason: request.member_info.reason.clone(),
+            timestamp: request.timestamp.map(|ts| ts.into()),
             is_seen: request.is_seen,
             actions: Arc::new(RequestToJoinActions { inner: request }),
         }
@@ -900,6 +901,8 @@ pub struct RequestToJoin {
     pub avatar_url: Option<String>,
     /// An optional reason why the user wants join the room.
     pub reason: Option<String>,
+    /// The timestamp when this request was created.
+    pub timestamp: Option<u64>,
     /// Whether the request to join has been marked as `seen` so it can be
     /// filtered by the client.
     pub is_seen: bool,
@@ -930,6 +933,14 @@ impl RequestToJoinActions {
     /// optional reason.
     pub async fn decline_and_ban(&self, reason: Option<String>) -> Result<(), ClientError> {
         self.inner.decline_and_ban(reason.as_deref()).await.map_err(Into::into)
+    }
+
+    /// Marks the request as 'seen'.
+    ///
+    /// **IMPORTANT**: this won't update the current reference to this request,
+    /// a new one with the updated value should be emitted instead.
+    pub async fn mark_as_seen(&self) -> Result<(), ClientError> {
+        self.inner.clone().mark_as_seen().await.map_err(Into::into)
     }
 }
 
