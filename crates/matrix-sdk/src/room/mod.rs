@@ -134,7 +134,10 @@ use crate::{
     event_handler::{EventHandler, EventHandlerDropGuard, EventHandlerHandle, SyncEvent},
     media::{MediaFormat, MediaRequestParameters},
     notification_settings::{IsEncrypted, IsOneToOne, RoomNotificationMode},
-    room::power_levels::{RoomPowerLevelChanges, RoomPowerLevelsExt},
+    room::{
+        power_levels::{RoomPowerLevelChanges, RoomPowerLevelsExt},
+        request_to_join::RequestToJoinRoom,
+    },
     sync::RoomUpdate,
     utils::{IntoRawMessageLikeEventContent, IntoRawStateEventContent},
     BaseRoom, Client, Error, HttpResult, Result, RoomState, TransmissionProgress,
@@ -146,6 +149,8 @@ pub mod identity_status_changes;
 mod member;
 mod messages;
 pub mod power_levels;
+/// Contains code related to requests to join a room.
+pub mod request_to_join;
 
 /// A struct containing methods that are common for Joined, Invited and Left
 /// Rooms
@@ -3211,6 +3216,17 @@ impl Room {
                 requests
             };
         Ok(current_requests_to_join_ids)
+    }
+
+    /// Subscribes to the set of requests to join that have been marked as
+    /// 'seen'.
+    pub async fn subscribe_to_seen_requests_to_join_ids(
+        &self,
+    ) -> Result<(HashSet<OwnedEventId>, impl Stream<Item = HashSet<OwnedEventId>>)> {
+        let current = self.get_seen_requests_to_join_ids().await?;
+        let subscriber =
+            self.seen_requests_to_join_ids.subscribe().map(|values| values.unwrap_or_default());
+        Ok((current, subscriber))
     }
 }
 
