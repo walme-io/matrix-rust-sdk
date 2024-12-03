@@ -700,8 +700,8 @@ impl Room {
 
         // Construct a filter that is specific to this own user id, set of member hints,
         // and accepts a `RoomHero` type.
-        let heroes_filter =
-            |hero: &&RoomHero| heroes_filter(own_user_id, &member_hints)(&hero.user_id);
+        let heroes_filter = heroes_filter(own_user_id, &member_hints);
+        let heroes_filter = |hero: &&RoomHero| heroes_filter(&hero.user_id);
 
         for hero in heroes.iter().filter(heroes_filter) {
             if let Some(display_name) = &hero.display_name {
@@ -734,8 +734,8 @@ impl Room {
 
         // Construct a filter that is specific to this own user id, set of member hints,
         // and accepts a `RoomMember` type.
-        let heroes_filter =
-            |u: &RoomMember| heroes_filter(self.own_user_id(), &member_hints)(u.user_id());
+        let heroes_filter = heroes_filter(&self.own_user_id, &member_hints);
+        let heroes_filter = |u: &RoomMember| heroes_filter(u.user_id());
 
         let mut members = self.members(RoomMemberships::JOIN | RoomMemberships::INVITE).await?;
 
