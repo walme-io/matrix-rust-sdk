@@ -793,9 +793,7 @@ impl Room {
                     .inspect_err(|e| warn!("Couldn't deserialize the member hints event: {e}"))
                     .ok()
             })
-            .and_then(|event| as_variant!(event, SyncOrStrippedState::Sync))
-            .and_then(|event| as_variant!(event, SyncStateEvent::Original))
-            .map(|e| e.content)
+            .and_then(|event| as_variant!(event, SyncOrStrippedState::Sync(SyncStateEvent::Original(e)) => e.content))
             .unwrap_or_default())
     }
 
