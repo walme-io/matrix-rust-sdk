@@ -18,9 +18,7 @@ use core::fmt;
 use std::{ops::Deref, sync::Arc};
 
 use async_once_cell::OnceCell as AsyncOnceCell;
-use matrix_sdk::SlidingSync;
 use ruma::RoomId;
-use tracing::info;
 
 use super::Error;
 use crate::{
@@ -43,9 +41,6 @@ impl fmt::Debug for Room {
 }
 
 struct RoomInner {
-    /// The Sliding Sync where everything comes from.
-    sliding_sync: Arc<SlidingSync>,
-
     /// The underlying client room.
     room: matrix_sdk::Room,
 
@@ -63,14 +58,8 @@ impl Deref for Room {
 
 impl Room {
     /// Create a new `Room`.
-    pub(super) fn new(room: matrix_sdk::Room, sliding_sync: &Arc<SlidingSync>) -> Self {
-        Self {
-            inner: Arc::new(RoomInner {
-                sliding_sync: sliding_sync.clone(),
-                room,
-                timeline: AsyncOnceCell::new(),
-            }),
-        }
+    pub(super) fn new(room: matrix_sdk::Room) -> Self {
+        Self { inner: Arc::new(RoomInner { room, timeline: AsyncOnceCell::new() }) }
     }
 
     /// Get the room ID.
