@@ -1,11 +1,12 @@
 use std::{future::ready, ops::ControlFlow, sync::Arc, time::Duration};
 
-use assert_matches2::{assert_let, assert_matches};
+use assert_matches::assert_matches;
+use assert_matches2::assert_let;
 use matrix_sdk::{
     config::StoreConfig,
     event_cache::{
-        paginator::PaginatorState, BackPaginationOutcome, EventCacheError, RoomEventCacheUpdate,
-        TimelineHasBeenResetWhilePaginating,
+        paginator::PaginatorState, BackPaginationOutcome, EventCacheError, EventsOrigin,
+        RoomEventCacheUpdate, TimelineHasBeenResetWhilePaginating,
     },
     linked_chunk::{ChunkIdentifier, Position, Update},
     test_utils::{assert_event_matches_msg, logged_in_client_with_server, mocks::MatrixMockServer},
@@ -880,4 +881,70 @@ async fn test_limited_timeline_resets_pagination() {
     assert_eq!(next_state, PaginatorState::Initial);
 
     assert!(room_stream.is_empty());
+}
+
+#[async_test]
+async fn test_limited_timeline_with_storage() {
+    let server = MatrixMockServer::new().await;
+
+    let event_cache_store = Arc::new(MemoryStore::new());
+    let client = server
+        .client_builder()
+        .store_config(
+            StoreConfig::new("hodlor".to_owned()).event_cache_store(event_cache_store.clone()),
+        )
+        .build()
+        .await;
+
+    let event_cache = client.event_cache();
+
+    // Don't forget to subscribe and like^W enable storage!
+    event_cache.subscribe().unwrap();
+    event_cache.enable_storage().unwrap();
+
+    let room_id = room_id!("!galette:saucisse.bzh");
+    let room = server.sync_joined_room(&client, room_id).await;
+
+    let (room_event_cache, _drop_handles) = room.event_cache().await.unwrap();
+
+    let f = EventFactory::new().room(room_id).sender(user_id!("@ben:saucisse.bzh"));
+
+    // First sync: get a message.
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(room_id).add_timeline_event(f.text_msg("hey yo")),
+        )
+        .await;
+
+    let (initial_events, mut subscriber) = room_event_cache.subscribe().await.unwrap();
+
+    // The initial events contains the previous message.
+    assert_eq!(initial_events.len(), 1);
+    assert_event_matches_msg(&initial_events[0], "hey yo");
+
+    assert!(subscriber.is_empty());
+
+    // Second update: get a message but from a limited timeline.
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(room_id)
+                .add_timeline_event(f.text_msg("gappy!"))
+                .set_timeline_limited(),
+        )
+        .await;
+
+    let update = timeout(Duration::from_secs(2), subscriber.recv())
+        .await
+        .expect("timeout after receiving a sync update")
+        .expect("should've received a room event cache update");
+
+    assert_matches!(update, RoomEventCacheUpdate::AddTimelineEvents { events, origin: EventsOrigin::Sync } => {
+        assert_eq!(events.len(), 1);
+        assert_event_matches_msg(&events[0], "gappy!");
+    });
+
+    // That's all, folks!
+    assert!(subscriber.is_empty());
 }
