@@ -2636,7 +2636,7 @@ mod tests {
         members.insert(bot.into(), f.member(bot).display_name("Bot").into_raw());
 
         let member_hints_content =
-            f.member_hints(BTreeSet::from([bot.to_owned()])).sender(&me).into_raw();
+            f.member_hints(BTreeSet::from([bot.to_owned()])).sender(me).into_raw();
         changes
             .state
             .entry(room_id.to_owned())
@@ -2706,7 +2706,7 @@ mod tests {
         members.insert(bot.into(), f.member(bot).display_name("Bot").into_raw());
 
         let member_hints_content =
-            f.member_hints(BTreeSet::from([bot.to_owned()])).sender(&me).into_raw();
+            f.member_hints(BTreeSet::from([bot.to_owned()])).sender(me).into_raw();
         changes
             .state
             .entry(room_id.to_owned())
