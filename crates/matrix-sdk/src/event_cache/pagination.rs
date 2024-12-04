@@ -119,7 +119,8 @@ impl RoomPagination {
     }
 
     async fn run_backwards_impl(&self, batch_size: u16) -> Result<Option<BackPaginationOutcome>> {
-        const DEFAULT_WAIT_FOR_TOKEN_DURATION: Duration = Duration::from_secs(3);
+        //const DEFAULT_WAIT_FOR_TOKEN_DURATION: Duration = Duration::from_secs(3);
+        const DEFAULT_WAIT_FOR_TOKEN_DURATION: Duration = Duration::from_secs(0);
 
         let prev_token = self.get_or_wait_for_token(Some(DEFAULT_WAIT_FOR_TOKEN_DURATION)).await;
 
